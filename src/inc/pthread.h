@@ -8,7 +8,10 @@
 #include "debug.h"
 
 
-
+/**
+ * Provide an interface for calling real pthread functions.
+ * The Pthread class has only one instance, which is initialized when first use
+ */
 class Pthread {
 private:
   
@@ -43,35 +46,12 @@ private:
   int (*_pthread_barrier_wait) (pthread_barrier_t*);
   int (*_pthread_barrier_destroy) (pthread_barrier_t*);
 
-public:
-
-  // constructor
-  Pthread():
-    _pythread_create(NULL),
-    _pthread_cancel(NULL),
-    _pthread_join(NULL),
-    _pthread_exit(NULL),
-    _pthread_mutexattr_init(NULL),
-    _pthread_mutex_init(NULL),
-    _pthread_mutex_lock(NULL),
-    _pthread_mutex_unlock(NULL),
-    _pthread_mutex_trylock(NULL),
-    _pthread_mutex_destroy(NULL),
-    _pthread_condattr_init(NULL),
-    _pthread_cond_init(NULL),
-    _pthread_cond_wait(NULL),
-    _pthread_cond_signal(NULL),
-    _pthread_cond_broadcast(NULL),
-    _pthread_cond_destroy(NULL),
-    _pthread_barrier_init(NULL),
-    _pthread_barrier_wait(NULL),
-    _pthread_barrier_destroy(NULL)
-    {}
 
   void init() {
-    DEBUG("Initializing references to replaced functions inlibpthread");
 
-    // Open the libpthread
+    DEBUG("Initializing references to real functions in libpthread");
+    DEBUG("dlopen libthread");
+
     _pthread_handle = dlopen("libpthread.so.0", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
     if (pthread_handle == NULL) {
       fprintf(stderr, "Unable to load libpthread.so.0\n");
@@ -81,7 +61,7 @@ public:
     }
 
     // Bind pthread calls to our own references
-    #define LOAD_SYM(name, handle) \
+#define LOAD_SYM(name, handle) \
           _##name = (typeof(_##name) dlsym(handle, #name); \
           assert(_##name != NULL);
 
@@ -107,9 +87,122 @@ public:
   }
 
 
+public:
+
+  // constructor
+  Pthread():
+    _pythread_create(NULL),
+    _pthread_cancel(NULL),
+    _pthread_join(NULL),
+    _pthread_exit(NULL),
+    _pthread_mutexattr_init(NULL),
+    _pthread_mutex_init(NULL),
+    _pthread_mutex_lock(NULL),
+    _pthread_mutex_unlock(NULL),
+    _pthread_mutex_trylock(NULL),
+    _pthread_mutex_destroy(NULL),
+    _pthread_condattr_init(NULL),
+    _pthread_cond_init(NULL),
+    _pthread_cond_wait(NULL),
+    _pthread_cond_signal(NULL),
+    _pthread_cond_broadcast(NULL),
+    _pthread_cond_destroy(NULL),
+    _pthread_barrier_init(NULL),
+    _pthread_barrier_wait(NULL),
+    _pthread_barrier_destroy(NULL)
+    {}
+
+
+  // Singleton pattern
+  static Pthread& getInstance(void) {
+    static Pthread *obj = NULL;
+    if (obj == NULL) { 
+      obj = new Pthread();
+      //obj.init();  initialize automatically
+    }
+    return *obj;
+  }
+
+
+  int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
+    return _pthread_create(tid, attr, fn, arg);
+  }
+
+  int cancel(pthread_t tid) {
+    return _pthread_cancel(tid);
+  }
+
+  int join(pthread_t tid, void **val) {
+    return _pthread_join(tid, val);
+  }
+
+  int exit(void *val_ptr) {
+    return _pthread_exit(val_ptr);
+  }
+
+  int mutexattr_init(pthread_mutexattr_t *attr) {
+    return _pthread_mutexattr_init(attr);
+  }
+
+  int mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
+    return _pthread_mutex_init(mutex, attr);
+  }
+
+  int mutex_lock(pthread_mutex_t *mutex) {
+    return _pthread_mutex_lock(mutex);
+  }
+
+  int mutex_unlock(pthread_mutex_t *mutex) {
+    return _pthread_mutex_unlock(mutex);
+  }
+
+  int mutex_trylock(pthread_mutex_t *mutex) {
+    return _pthread_mutex_trylock(mutex);
+  }
+
+  int mutex_destroy(pthread_mutex_t *mutex) {
+    return _pthread_mutex_destroy(mutex);
+  }
+
+  int condattr_init(pthread_condattr_t *attr) {
+    return _pthread_condattr_init(attr);
+  }
+
+  int cond_init(pthread_cond_t *cond, pthread_condattr_t *attr) {
+    return _pthread_cond_init(cond, attr);
+  }
+
+  int cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
+    return _pthread_cond_wait(cond, mutex);
+  }
+
+  int cond_signal(pthread_cond_t *cond) {
+    return _pthread_cond_signal(cond);
+  }
+
+  int cond_broadcast(pthread_cond_t *cond) {
+    return _pthread_cond_broadcast(cond);
+  }
+
+  int cond_destroy(pthread_cond_t *cond) {
+    return _pthread_cond_destroy(cond);
+  }
+
+  int barrier_init(pthread_barrier_t *barrier, pthread_barrierattr_t *attr, unsigned int count) {
+    return _pthread_barrier_init(barrier, attr, count);
+  }
+
+  int barrier_wait(pthread_barrier_t *barrier) {
+    return _pthread_barrier_wait(barrier);
+  }
+
+  int barrier_destroy(pthread_barrier_t *barrier) {
+    return _pthread_barrier_destroy(barrier);
+  }
+
   void del() {
     if (_pthread_handle != NULL) {
-      DEBUG("Unload the libpthread");
+      DEBUG("dlclose libthread");
       dlclose(_pthread_handle);
     }
 
