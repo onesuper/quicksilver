@@ -5,8 +5,8 @@
 
 #ifdef DEBUG
   #define DEBUG(...) \
-            fprintf(stderr, "<%s,%d>: ", __FILE__, __LINE__); \
-            fprintf(stderr, __VA_ARG__); \
+            fprintf(stderr, "[%25s:%-4d] ", __FILE__, __LINE__); \
+            fprintf(stderr, __VA_ARGS__); \
             fprintf(stderr, "\n");
 #else
   #define DEBUG(...)          
