@@ -1,26 +1,36 @@
 
+#include "stdlib.h"
 #include "debug.h"
-
+#include "qthread.h"
 
 /**
- * 
+ * A shim to call replaced pthread subroutines
  */
 
 // GCC-specific global constructor
+// Call them to init Pthread class before or after main
+
 #if defined(__GNUG__)
-void before_everything() __attribute__((constructor));
-void after_everything() __attribute__((destructor));
+
+__attribute__((constructor))
+void before_everything() {
+  DEBUG("Registering qthread instance");
+  if (Qthread::getInstance().init()) {
+    ERROR("Aborting...");
+    exit(1);
+  }
+}
+
+__attribute__((destructor))
+void after_everyting() {
+  DEBUG("Deregistering qthread instance");
+  Qthread::getInstance().del();
+}
+
 #endif
 
 
-// Call them to init Pthread class before or after main
-void before_everything() {
-  Qthread::getInstance().init();
-}
-
-void after_everyting() {
-  Qthread::getInstance().del();
-}
+extern "C" {
 
 // pthread basic
 int pthread_create (pthread_t *tid, const pthread_attr_t *attr, void *(*fn) (void *), void *arg) {
@@ -40,7 +50,7 @@ int pthread_join(pthread_t tid, void **val) {
 
 int pthread_exit(void *value_ptr) {
   DEBUG("Call replaced pthread_exit");
-  return Qthread::getInstance().exit(ptr);
+  return Qthread::getInstance().exit(value_ptr);
 }
 
 // pthread mutex
@@ -100,13 +110,13 @@ int pthread_cond_broadcast(pthread_cond_t *cond) {
   return Qthread::getInstance().cond_broadcast(cond);  
 }
 
-int pthread_cond_destroy(pthread_cond_t * cond) {
+int pthread_cond_destroy(pthread_cond_t *cond) {
   DEBUG("Call replaced pthread_cond_destroy");
   return Qthread::getInstance().cond_destroy(cond);
 }
 
 // pthread barrier
-int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t * attr, unsigned int count) {
+int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count) {
   DEBUG("Call replaced pthread_barrier_init");
   return Qthread::getInstance().barrier_init(barrier, attr, count);
 }
@@ -118,7 +128,9 @@ int pthread_barrier_wait(pthread_barrier_t *barrier) {
 
 int pthread_barrier_destroy(pthread_barrier_t *barrier) {
   DEBUG("Call replaced pthread_barrier_destroy");
-  return Qthread::getInstance().barrier_destroy();
+  return Qthread::getInstance().barrier_destroy(barrier);
 }
 
+
+}
 

@@ -1,6 +1,8 @@
 #pragma once
 
 
+#include "pthread.h"  // our pthread header
+
 
 class Qthread {
 
@@ -17,8 +19,8 @@ public:
     return *obj;
   }
 
-  void init() {
-    Pthread::getInstance().init();
+  int init() {
+    return Pthread::getInstance().init();
   }
 
   int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
@@ -43,7 +45,7 @@ public:
 
   int mutexattr_init(pthread_mutexattr_t *attr) {
     DEBUG("Call real pthread_mutexattr_init");
-    return Pthread::getInstance().init(attr);
+    return Pthread::getInstance().mutexattr_init(attr);
   }
 
   int mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
@@ -76,7 +78,7 @@ public:
     return Pthread::getInstance().condattr_init(attr);
   }
 
-  int cond_init(pthread_cond_t *cond, pthread_condattr_t *attr) {
+  int cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
     DEBUG("Call real pthread_cond_init");
     return Pthread::getInstance().cond_init(cond, attr);
   }
@@ -101,7 +103,7 @@ public:
     return Pthread::getInstance().cond_destroy(cond);
   }
 
-  int barrier_init(pthread_barrier_t *barrier, pthread_barrierattr_t *attr, unsigned int count) {
+  int barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count) {
     DEBUG("Call real pthread_barrier_init");
     return Pthread::getInstance().barrier_init(barrier, attr, count);
   }
@@ -121,4 +123,4 @@ public:
   }
 
   
-}
+};
