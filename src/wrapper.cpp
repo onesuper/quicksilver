@@ -15,10 +15,7 @@
 __attribute__((constructor))
 void before_everything() {
   DEBUG("Registering qthread instance");
-  if (Qthread::getInstance().init()) {
-    ERROR("Aborting...");
-    exit(1);
-  }
+  Qthread::getInstance().init()
 }
 
 __attribute__((destructor))

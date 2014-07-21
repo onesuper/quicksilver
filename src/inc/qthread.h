@@ -19,8 +19,8 @@ public:
     return *obj;
   }
 
-  int init() {
-    return Pthread::getInstance().init();
+  void init() {
+    Pthread::getInstance().init();
   }
 
   int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
@@ -85,7 +85,7 @@ public:
 
   int cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
     DEBUG("Call real pthread_cond_wait");
-   return Pthread::getInstance().cond_wait(cond, mutex);
+    return Pthread::getInstance().cond_wait(cond, mutex);
   }
 
   int cond_signal(pthread_cond_t *cond) {

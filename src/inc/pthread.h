@@ -1,7 +1,6 @@
 #pragma once
 
 
-#include <pthread.h>
 #include <sys/types.h>
 #include <dlfcn.h>
 #include <assert.h>
@@ -74,7 +73,7 @@ public:
     _pthread_barrier_destroy(NULL)
     {}
 
-  int init() {
+  void init() {
 
     DEBUG("Initializing references to real functions in libpthread");
     DEBUG("dlopen libthread");
@@ -82,7 +81,8 @@ public:
     _pthread_handle = dlopen("libpthread.so.0", RTLD_NOW);
     if (_pthread_handle == NULL) {
       ERROR("Unable to load libpthread.so.0: %s", dlerror());
-      return 1;
+      ERROR("Aborting...");
+      exit(1);
     }
 
     // Bind pthread calls to our own references
@@ -110,7 +110,6 @@ public:
     LOAD_SYM(pthread_barrier_wait);
     LOAD_SYM(pthread_barrier_destroy);
 
-    return 0;
   }
 
 
