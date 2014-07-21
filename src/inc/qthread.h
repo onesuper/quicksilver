@@ -2,14 +2,36 @@
 
 
 #include "pthread.h"  // our pthread header
-
+#include "list.h"
 
 class Qthread {
 
 private:
 
+  // Register all the active threads into this list.
+  List _activelist;
+
+  // All threads use this lock to prevent from data race.
+  pthread_mutex_t        _mutex;
+  pthread_mutexattr_t    _mutexattr;
+
+  // Pointing to the thread entry who holds the token
+  ThreadEntry *_token_holder;
+
+  inline void lock(void) {
+    Pthread::getInstance().mutex_lock(&_mutex);
+  }
+
+  inline void unlock(void) {
+    Pthread::getInstance().mutex_unlock(&_mutex);
+  }
 
 public:
+
+  Qthread():
+    _token_holder(NULL)
+    {}
+
   // Singleton pattern
   static Qthread& getInstance(void) {
     static Qthread *obj = NULL;
@@ -21,9 +43,21 @@ public:
 
   void init() {
     Pthread::getInstance().init();
+    Pthread::getInstance().mutexattr_init(&_mutexattr);
+    Pthread::getInstance().mutex_init(&_mutex, &_mutexattr);
   }
 
   int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
+
+    // Create thread entry and add it to the _activelist
+    // The newly created thread will appear early in the list
+    // pthread_create must be sequential, so we don't have to use lock
+
+    static size_t _thread_count;
+    ThreadEntry *entry = new ThreadEntry(_thread_count);
+    _thread_count++;
+    _activelist.insertTail(entry);
+    _activelist.print();
     DEBUG("Call real pthread_create");
     return Pthread::getInstance().create(tid, attr, fn, arg);
   }
@@ -34,13 +68,21 @@ public:
   }
 
   int join(pthread_t tid, void **val) {
+
+
+    //lock();
+    // remove the thread entry
+    //_activelist.remove();
+    //unlock();
+
+
     DEBUG("Call real pthread_join");
     return Pthread::getInstance().join(tid, val);
   }
 
   int exit(void *val_ptr) {
     DEBUG("Call real pthread_exit");
-    return Pthread::getInstance().exit(val_ptr);
+    return Pthread::getInstance()._exit(val_ptr);
   }
 
   int mutexattr_init(pthread_mutexattr_t *attr) {

@@ -136,7 +136,7 @@ public:
     return _pthread_join(tid, val);
   }
 
-  int exit(void *val_ptr) {
+  int _exit(void *val_ptr) {
     return _pthread_exit(val_ptr);
   }
 

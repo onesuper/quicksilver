@@ -15,7 +15,7 @@
 __attribute__((constructor))
 void before_everything() {
   DEBUG("Registering qthread instance");
-  Qthread::getInstance().init()
+  Qthread::getInstance().init();
 }
 
 __attribute__((destructor))
