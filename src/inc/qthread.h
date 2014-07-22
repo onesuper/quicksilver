@@ -16,7 +16,7 @@ private:
   pthread_mutexattr_t    _mutexattr;
 
   // Pointing to the thread entry who holds the token
-  ThreadEntry *_token_holder;
+  ThreadEntry *_token_entry;
 
   inline void lock(void) {
     Pthread::getInstance().mutex_lock(&_mutex);
@@ -26,10 +26,18 @@ private:
     Pthread::getInstance().mutex_unlock(&_mutex);
   }
 
+  void wait_token(void) {
+
+  }
+
+  void pass_token(void) {
+
+  }
+
 public:
 
   Qthread():
-    _token_holder(NULL)
+    _token_entry(NULL)
     {}
 
   // Singleton pattern
@@ -49,15 +57,22 @@ public:
 
   int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
 
+    // pthread_create must be sequential, so we don't have to use lock
     // Create thread entry and add it to the _activelist
     // The newly created thread will appear early in the list
-    // pthread_create must be sequential, so we don't have to use lock
-
     static size_t _thread_count;
     ThreadEntry *entry = new ThreadEntry(_thread_count);
     _thread_count++;
     _activelist.insertTail(entry);
     _activelist.print();
+
+    // At first, token belongs to the first created thread
+    if (_token_entry == NULL) {
+      _token_entry = entry;
+    }
+
+
+
     DEBUG("Call real pthread_create");
     return Pthread::getInstance().create(tid, attr, fn, arg);
   }
@@ -75,6 +90,7 @@ public:
     //_activelist.remove();
     //unlock();
 
+    _token_entry->print();
 
     DEBUG("Call real pthread_join");
     return Pthread::getInstance().join(tid, val);

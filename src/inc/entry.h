@@ -7,7 +7,7 @@ struct Entry {
   Entry *prev;
   Entry *next;
 
-  virtual void printf() {};
+  virtual void print() {};
 };
 
 
@@ -22,6 +22,6 @@ public:
   }
 
   void print(void) {
-    printf("%d\t", _thread_index);
+    printf("  %d  ", _thread_index);
   }
 };
