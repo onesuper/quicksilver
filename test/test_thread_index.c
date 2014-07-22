@@ -1,11 +1,12 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <syscall.h>
 
 
 void *worker(void *data) {
   
-  printf("self=%d, pid=%d, tid=%d\n", pthread_self(), getpid(), gettid());
+  printf("self=%lu, pid=%d, tid=%d\n", pthread_self(), syscall(SYS_getpid), syscall(SYS_gettid));
   return NULL;
 }
 

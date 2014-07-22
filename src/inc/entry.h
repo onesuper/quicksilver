@@ -22,6 +22,6 @@ public:
   }
 
   void print(void) {
-    printf("  %d  ", _thread_index);
+    DEBUG("  %d  ", _thread_index);
   }
 };
