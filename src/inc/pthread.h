@@ -9,6 +9,9 @@
 #include "error.h"
 
 
+typedef void *ThreadFunction(void *);
+
+
 /**
  * Provide an interface for calling real pthread functions.
  * The Pthread class has only one instance, which is initialized when first use
@@ -21,32 +24,31 @@ private:
 
   // Some func pointers used to call real pthread libraries
   // pthread basics
-  int (*_pthread_create) (pthread_t*, const pthread_attr_t*, void *(*)(void*), void*);
+  int (*_pthread_create) (pthread_t *, const pthread_attr_t *, ThreadFunction *, void *);
   int (*_pthread_cancel) (pthread_t);
-  int (*_pthread_join) (pthread_t, void**);
-  int (*_pthread_exit) (void*);
+  int (*_pthread_join) (pthread_t, void **);
+  int (*_pthread_exit) (void *);
 
   // pthread mutexes
-  int (*_pthread_mutexattr_init) (pthread_mutexattr_t*);
-  int (*_pthread_mutex_init) (pthread_mutex_t*, const pthread_mutexattr_t*);
-  int (*_pthread_mutex_lock) (pthread_mutex_t*);
-  int (*_pthread_mutex_unlock) (pthread_mutex_t*);
-  int (*_pthread_mutex_trylock) (pthread_mutex_t*);
-  int (*_pthread_mutex_destroy) (pthread_mutex_t*);
+  int (*_pthread_mutexattr_init) (pthread_mutexattr_t *);
+  int (*_pthread_mutex_init) (pthread_mutex_t *, const pthread_mutexattr_t *);
+  int (*_pthread_mutex_lock) (pthread_mutex_t *);
+  int (*_pthread_mutex_unlock) (pthread_mutex_t *);
+  int (*_pthread_mutex_trylock) (pthread_mutex_t *);
+  int (*_pthread_mutex_destroy) (pthread_mutex_t *);
 
    // pthread condition variables
-  int (*_pthread_condattr_init) (pthread_condattr_t*);
-  int (*_pthread_cond_init) (pthread_cond_t*, const pthread_condattr_t*);
-  int (*_pthread_cond_wait) (pthread_cond_t*, pthread_mutex_t*);
-  int (*_pthread_cond_signal) (pthread_cond_t*);
-  int (*_pthread_cond_broadcast) (pthread_cond_t*);
-  int (*_pthread_cond_destroy) (pthread_cond_t*);
+  int (*_pthread_condattr_init) (pthread_condattr_t *);
+  int (*_pthread_cond_init) (pthread_cond_t *, const pthread_condattr_t *);
+  int (*_pthread_cond_wait) (pthread_cond_t *, pthread_mutex_t *);
+  int (*_pthread_cond_signal) (pthread_cond_t *);
+  int (*_pthread_cond_broadcast) (pthread_cond_t *);
+  int (*_pthread_cond_destroy) (pthread_cond_t *);
 
   // pthread barriers
-  int (*_pthread_barrier_init) (pthread_barrier_t*, const pthread_barrierattr_t*, unsigned int);
-  int (*_pthread_barrier_wait) (pthread_barrier_t*);
-  int (*_pthread_barrier_destroy) (pthread_barrier_t*);
-
+  int (*_pthread_barrier_init) (pthread_barrier_t *, const pthread_barrierattr_t *, unsigned int);
+  int (*_pthread_barrier_wait) (pthread_barrier_t *);
+  int (*_pthread_barrier_destroy) (pthread_barrier_t *);
 
 
 public:
@@ -124,7 +126,7 @@ public:
   }
 
 
-  int create(pthread_t *tid, const pthread_attr_t *attr, void *(*fn)(void *) , void *arg) {
+  int create(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction *fn , void *arg) {
     return _pthread_create(tid, attr, fn, arg);
   }
 

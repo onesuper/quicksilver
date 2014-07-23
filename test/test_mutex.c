@@ -23,7 +23,7 @@ void *worker(void *data) {
 
 
 int main(int argc, char **argv) {
-  const int nThreads = 8;
+  const int nThreads = 2;
   pthread_t workers[nThreads];
   int i;
 
