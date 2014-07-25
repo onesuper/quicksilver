@@ -6,11 +6,11 @@
 #include "list.h"
 
 
+#define MAX_THREADS 2048
+
 class Qthread {
 
-
 private:
-
   // Register all the active threads into this list.
   List _activelist;
 
@@ -21,26 +21,16 @@ private:
   // Pointing to the thread entry who holds the token
   ThreadEntry *_token_entry;
 
-  inline void lock(void) {
-    Pthread::getInstance().mutex_lock(&_mutex);
-  }
+  // ThreadEntry lookup table, hash the thread in this table by index
+  ThreadEntry _thread_entries[MAX_THREADS];
 
-  inline void unlock(void) {
-    Pthread::getInstance().mutex_unlock(&_mutex);
-  }
-
-  void wait_for_token(void) {
-
-  }
-
-  void pass_token(void) {
-
-  }
+  size_t _max_thread_entries;
 
 public:
 
   Qthread():
-    _token_entry(NULL)
+    _token_entry(NULL),
+    _max_thread_entries(MAX_THREADS)
     {}
 
   // Singleton pattern
@@ -58,34 +48,35 @@ public:
     Pthread::getInstance().mutex_init(&_mutex, &_mutexattr);
   }
 
+
   int create(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction *fn , void *arg) {
 
-    int thread_index;
+    int tid;
 
-    // Use a static variable to cout the number of threads
+    // Use a global cout the number of threads
     static size_t thread_count = 0;
 
     lock();
-    thread_index = thread_count++;
+    tid = thread_count++;
     unlock();
 
-    // Create thread entry and add it to the _activelist
-    ThreadEntry *entry = new ThreadEntry(thread_index);
-    _activelist.insertTail(entry);
-    _activelist.print();
+    registerThread(tid);
 
-    // At the very beginning, token belongs to the first created thread
-    if (_token_entry == NULL) {
-      _token_entry = entry;
-    }
-
+    // Check token belonging
     DEBUG("Who has the token?");
     _token_entry->print();
 
     // Start spawning thread with the thread_index
-    DEBUG("Spawning thread %d", thread_index);
+    DEBUG("Spawning thread %d ...", tid);
     Thread* t = new Thread();
     return t->spawn(tid, attr, fn, arg, thread_index);
+  }
+
+  int exit(void *val_ptr) {
+
+    deregisterThread(Thread::getIndex());
+    DEBUG("Call real pthread_exit");
+    return Pthread::getInstance()._exit(val_ptr);
   }
 
   int cancel(pthread_t tid) {
@@ -94,17 +85,8 @@ public:
   }
 
   int join(pthread_t tid, void **val) {
-
-    //lock();
-    // remove the thread entry
-    //_activelist.remove();
-    //unlock();
-    return Thread::join(tid, val);
-  }
-
-  int exit(void *val_ptr) {
-    DEBUG("Call real pthread_exit");
-    return Pthread::getInstance()._exit(val_ptr);
+    DEBUG("Call real pthread_join");
+    return Pthread::getInstance().join(tid, val);
   }
 
   int mutexattr_init(pthread_mutexattr_t *attr) {
@@ -183,8 +165,106 @@ public:
   }
 
   void del() {
+    // Cleaning the pthread resources first
+    Pthread::getInstance().mutex_destroy(&_mutex);
     Pthread::getInstance().del();
   }
 
-  
+private:
+
+  inline void lock(void) {
+    Pthread::getInstance().mutex_lock(&_mutex);
+  }
+
+  inline void unlock(void) {
+    Pthread::getInstance().mutex_unlock(&_mutex);
+  }
+
+  inline void *allocThreadEntry(int thread_index) {
+    assert(thread_index < _max_thread_entries);
+    return (&_thread_entries[thread_index]);
+  }
+
+  inline void freeThreadEntry(void *entry) {
+    // do nothing here
+    return;
+  }
+
+  void wait_for_token(void) {
+    while (Thread::getIndex() != _token_entry->getIndex()) {}
+    DEBUG("Thread %d gets the token", Thread::getIndex();
+    return;
+  }
+
+  // Force thread tid pass his token to the next thread in the active list
+  void pass_token(int tid) {
+
+    lock();
+
+    // Make sure the target thread has token
+    if (tid != _token_entry->getIndex()) {
+      unlock();
+      ERROR("Error! Thread %d tried to pass token but the token belongs to %d", tid, _token_entry->getIndex());
+      assert(0);
+    }
+
+    ThreadEntry *next = (ThreadEntry *) _token_entry->next;
+
+    asset(next != NULL);
+    _token_entry = next;
+
+    DEBUG("Token is now passed to %d", _token_entry->getIndex());
+
+    unlock();
+
+  }
+
+  // Here we can assure the tid is unique
+  void registerThread(int tid) {
+
+    DEBUG("Registering thread %d ...", tid);
+
+    lock();
+
+    // Create a new threadEntry in the memory already allocated  
+    // allocThreadEntry() just return a position in an array
+    void *ptr = allocThreadEntry(tid);
+    ThreadEntry *entry = new (ptr) ThreadEntry(tid);
+
+    // Link the newly created threadEntry into the active thread list
+    _activelist.insertTail(entry);
+
+    // Print out the active list
+    _activelist.print();
+
+    // Initially, token belongs to the first created thread
+    if (_token_entry == NULL) {
+      _token_entry = entry;
+    }
+
+    unlock();
+  }
+
+  void deregisterThread(int tid) {
+
+    DEBUG("Deregistering thread %d ...", tid);
+
+    // Look up his entry via tid
+    ThreadEntry *entry = &_thread_entries[tid];
+    ThreadEntry *next = entry->next;
+
+    lock();
+
+    // Reomove the thread entry from activelist and entry table
+    _activelist.remove(entry);
+    freeThreadEntry(entry);
+
+    // pass the token
+    _token_entry = next;
+    DEBUG("Since %d is deregisterred, token is passed to %d", tid, _token_entry->getIndex());
+
+    unlock();
+
+  }
+
 };
