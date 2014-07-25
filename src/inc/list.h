@@ -60,15 +60,15 @@ public:
   }
 
   void print(void) {
-    DEBUG("Start printing thread entry...");
 
     Entry *entry = _head;
     
     do {
       entry->print();
       entry = entry->next;
-    } while (entry != _head); // Travel around the world
+    } while (entry != _head); // Travel around
 
     return;
   }
+  
 };

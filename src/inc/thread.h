@@ -33,17 +33,21 @@ public:
     return thread_index_local;
   }
 
-    // this is a fake entry point of thread
+
+  // Fake entry point of thread
   static void *fakeEntry(void *pthis) {
   
     Thread *obj = (Thread *)pthis;
-    // Set up the thread index inside our thread entry
+
+    // Set up the thread index in the thread's lifecycle
     thread_index_local = obj->_thread_index;
-    
+
     // Calling the real thread function
     obj->_thread_func(obj->_thread_arg);
+
     return NULL;
   }
+
 
   int spawn(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction *fn, void *arg, int thread_index) {
 
@@ -57,9 +61,8 @@ public:
     return Pthread::getInstance().create(tid, attr, &fakeEntry, this);
   }
 
-  static int join(pthread_t tid, void **val) {
-    DEBUG("Call real pthread_join");
-    return Pthread::getInstance().join(tid, val);
-  }
+
+
+
 };
 

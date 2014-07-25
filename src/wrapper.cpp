@@ -128,8 +128,6 @@ int pthread_barrier_destroy(pthread_barrier_t *barrier) {
   return Qthread::getInstance().barrier_destroy(barrier);
 }
 
-
 }
-
 
 

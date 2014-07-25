@@ -21,7 +21,11 @@ public:
     _thread_index = tid;
   }
 
+  int getIndex() {
+    return _thread_index;
+  }
+
   void print(void) {
-    DEBUG("  %d  ", _thread_index);
+    printf("  %d  ", _thread_index);
   }
 };
