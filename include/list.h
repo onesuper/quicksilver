@@ -18,10 +18,6 @@ public:
     {}
 
 
-  int empty() {
-    
-  }
-
   void insertTail(Entry *entry) {
     // The only entry in the list, elect him to be the head
     if (_head == NULL) {

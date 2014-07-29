@@ -8,8 +8,10 @@
 #include "thread_entry.h"
 #include "thread_private.h"
 #include "debug.h"
+#include "stat.h"
 
 #define MAX_THREADS 2048
+
 
 class Qthread {
 
@@ -29,11 +31,18 @@ private:
 
   size_t _max_thread_entries;
 
+
+  // Statistical info
+  Stat _stat_total;
+  Stat _stat_serial;
+
 public:
 
   Qthread():
     _token_entry(NULL),
-    _max_thread_entries(MAX_THREADS)
+    _max_thread_entries(MAX_THREADS),
+    _stat_total(),
+    _stat_serial()
     {}
 
   // Singleton pattern
@@ -46,12 +55,81 @@ public:
   }
 
   void init() {
+  
+
+    _stat_total.start();  
     whoHasToken();
     _activelist.print();
+    // Obtaining the pthread resources first
     Pthread::getInstance().init();
     Pthread::getInstance().mutexattr_init(&_mutexattr);
     Pthread::getInstance().mutex_init(&_mutex, &_mutexattr);
   }
+  
+  
+  void del() {
+    _stat_total.pause();
+
+  	DEBUG("Total Time: %ld", _stat_total.getTotal());
+  	DEBUG("Serial Time: %ld @ %ld", _stat_serial.getTotal(), _stat_serial.getTimes());  
+
+    whoHasToken();
+    _activelist.print();
+    // Cleaning the pthread resources first
+    Pthread::getInstance().mutex_destroy(&_mutex);
+    Pthread::getInstance().del();
+  }
+  
+  
+  
+  void waitForToken(void) {
+    DEBUG("<%d> wait for token (in <%d>'s hand)", my_tid(), _token_entry->getIndex());
+    while (my_tid() != _token_entry->getIndex()) {
+      sched_yield();
+    }
+    DEBUG("Thread %d gets the token", my_tid());
+    
+    _stat_serial.start();
+    
+    return;
+  }
+
+
+
+  // Force thread tid pass his token to the next thread in the active list
+  void passToken(void) {
+
+	  assert(_token_entry != NULL);
+	  
+	  _stat_serial.pause();
+	  
+    lock();
+    // Do I have token?
+    if (my_tid() != _token_entry->getIndex()) {
+      unlock();
+      ERROR("Error! <%d> attempts to pass token but the token belongs to %d", my_tid(), _token_entry->getIndex());
+      assert(0);
+    }
+
+    ThreadEntry *next = (ThreadEntry *) _token_entry->next;
+    _token_entry = next;
+    DEBUG("<%d> Token is now passed to %d", my_tid(), _token_entry->getIndex());
+
+    unlock();
+
+    return;
+  }
+
+
+	void whoHasToken(void) {
+		DEBUG("Who has the token?");
+		
+		if (_token_entry != NULL) {
+    	_token_entry->print();
+    } else {
+      DEBUG("No one!");
+    }
+	}
 
 
   void registerThread(int tid) {
@@ -215,13 +293,7 @@ public:
     return Pthread::getInstance().barrier_destroy(barrier);
   }
 
-  void del() {
-    whoHasToken();
-    _activelist.print();
-    // Cleaning the pthread resources first
-    Pthread::getInstance().mutex_destroy(&_mutex);
-    Pthread::getInstance().del();
-  }
+
 
 
   inline void lock(void) {
@@ -242,50 +314,7 @@ public:
     return;
   }
 
-  void waitForToken(void) {
-    DEBUG("<%d> wait for token (in <%d>'s hand)", my_tid(), _token_entry->getIndex());
-    while (my_tid() != _token_entry->getIndex()) {
-    	//DEBUG("<%d> attempts to obtain the token", my_tid());    
-      sched_yield();
-    }
-    DEBUG("Thread %d gets the token", my_tid());
-    return;
-  }
 
-
-
-  // Force thread tid pass his token to the next thread in the active list
-  void passToken(void) {
-
-	  assert(_token_entry != NULL);
-	  
-    lock();
-    // Do I have token?
-    if (my_tid() != _token_entry->getIndex()) {
-      unlock();
-      ERROR("Error! <%d> attempts to pass token but the token belongs to %d", my_tid(), _token_entry->getIndex());
-      assert(0);
-    }
-
-    ThreadEntry *next = (ThreadEntry *) _token_entry->next;
-    _token_entry = next;
-    DEBUG("<%d> Token is now passed to %d", my_tid(), _token_entry->getIndex());
-
-    unlock();
-
-    return;
-  }
-
-
-	void whoHasToken(void) {
-		DEBUG("Who has the token?");
-		
-		if (_token_entry != NULL) {
-    	_token_entry->print();
-    } else {
-      DEBUG("No one!");
-    }
-	}
 
 
 

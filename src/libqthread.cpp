@@ -5,23 +5,32 @@
 #include "thread_kicker.h"
 #include "thread_private.h"
 
+
+
+
+Stat *g_stat_total;
+Stat *g_stat_serial;
+
 /**
  * A shim to call replaced pthread subroutines
  */
 
 // GCC-specific global constructor
-// Call them to init Pthread class before or after main
+// Call them to init/del Pthread class before or after main
 
 #if defined(__GNUG__)
 
 __attribute__((constructor))
 void before_everything() {
+
+
   DEBUG("Registering qthread instance");
   Qthread::getInstance().init();
 }
 
 __attribute__((destructor))
 void after_everyting() {
+
   DEBUG("Deregistering qthread instance");
   Qthread::getInstance().del();
 }

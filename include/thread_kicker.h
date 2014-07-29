@@ -5,13 +5,10 @@
 #include "ppthread.h"
 #include "thread_private.h"
 
-// Thread local storage: use to let thread know who he is
-__thread size_t thread_index_local;
-  
+
 
 /**
- * This class is used to spawn a thread which is wrapped around our
- * register/deregister functions
+ * This class is used to spawn a wrapped thread
  */
 class ThreadKicker {
 
@@ -41,7 +38,9 @@ public:
     // Calling the real thread function
     obj->_thread_func(obj->_thread_arg);
 
-    // deregister me!
+    // Deregister thread manually 
+    // NOTE: if user call pthread_exit in thread func, the following code
+    // will be dismissed
     Qthread::getInstance().deregisterThread(obj->_thread_index);
 
     return NULL;
@@ -49,15 +48,13 @@ public:
 
    int spawn(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction fn, void *arg) {
 
-
     static int global_thread_count = 0;
 
     Qthread::getInstance().lock();
-    
-    // Hook up the thread function and argumens pointer and store thread id
     _thread_index = global_thread_count++;
     Qthread::getInstance().unlock();
     
+    // Hook up the thread function and arguments 
     _thread_func = fn;
     _thread_arg = arg;
 
@@ -67,7 +64,8 @@ public:
     DEBUG("Spawning thread %ld ...", _thread_index);
     DEBUG("Call real pthread_create");
     
-    // Pack the function/arugment pointer in thread object.Then pass it via the 4th argument
+    // Pack the function/arugment pointer in thread object.
+    // Then pass it via the last parameter
     int retval = Pthread::getInstance().create(tid, attr, &threadEntry, this);
  
 
