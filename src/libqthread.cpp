@@ -2,6 +2,8 @@
 #include "stdlib.h"
 #include "debug.h"
 #include "qthread.h"
+#include "thread_kicker.h"
+#include "thread_private.h"
 
 /**
  * A shim to call replaced pthread subroutines
@@ -30,9 +32,10 @@ void after_everyting() {
 extern "C" {
 
 // pthread basic
-int pthread_create (pthread_t *tid, const pthread_attr_t *attr, void *(*fn) (void *), void *arg) {
+int pthread_create (pthread_t *tid, const pthread_attr_t *attr, ThreadFunction fn, void *arg) {
   DEBUG("Call replaced pthread_create");
-  return Qthread::getInstance().create(tid, attr, fn, arg);
+  ThreadKicker *kicker = new ThreadKicker();
+  return kicker->spawn(tid, attr, fn, arg);
 }
 
 int pthread_cancel(pthread_t tid) {
@@ -46,7 +49,7 @@ int pthread_join(pthread_t tid, void **val) {
 }
 
 int pthread_exit(void *value_ptr) {
-  DEBUG("Call replaced pthread_exit");
+  DEBUG("<%d> call replaced pthread_exit", my_tid());
   return Qthread::getInstance().exit(value_ptr);
 }
 
@@ -62,12 +65,12 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) 
 }
 
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
-  DEBUG("Call replaced pthread_mutex_lock");
+  DEBUG("<%d> call replaced pthread_mutex_lock", my_tid());
   return Qthread::getInstance().mutex_lock(mutex);
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex) {
-  DEBUG("Call replaced pthread_mutex_unlock");
+  DEBUG("<%d> all replaced pthread_mutex_unlock", my_tid());
   return Qthread::getInstance().mutex_unlock(mutex);
 }
 
