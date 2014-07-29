@@ -7,7 +7,7 @@ pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void do_something(void) {
   int i, a;
-  for (i = 0; i < 1000; i++) a++;
+  for (i = 0; i < 100000; i++) a++;
 }
 
 
@@ -18,9 +18,10 @@ void *worker(void *data) {
 
   pthread_mutex_unlock(&g_lock);
 
-  pthread_exit(0);
+  do_something();
+  //pthread_exit(0);
 
-  //return NULL;
+  return NULL;
 }
 
 

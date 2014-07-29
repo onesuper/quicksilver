@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #ifdef DEBUG
+  #undef DEBUG
   #define DEBUG(...) \
             fflush(stdout); \
             fprintf(stderr, "[%25s:%-4d] ", __FILE__, __LINE__); \

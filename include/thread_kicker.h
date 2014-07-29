@@ -62,7 +62,7 @@ public:
     Qthread::getInstance().registerThread(_thread_index);
 
     DEBUG("Spawning thread %ld ...", _thread_index);
-    DEBUG("Call real pthread_create");
+
     
     // Pack the function/arugment pointer in thread object.
     // Then pass it via the last parameter

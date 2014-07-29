@@ -7,10 +7,6 @@
 
 
 
-
-Stat *g_stat_total;
-Stat *g_stat_serial;
-
 /**
  * A shim to call replaced pthread subroutines
  */
@@ -79,7 +75,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex) {
-  DEBUG("<%d> all replaced pthread_mutex_unlock", my_tid());
+  DEBUG("<%d> call replaced pthread_mutex_unlock", my_tid());
   return Qthread::getInstance().mutex_unlock(mutex);
 }
 

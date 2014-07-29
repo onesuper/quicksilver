@@ -1,7 +1,7 @@
 
 
 CC = g++
-CFLAGS = -m64 -O3 -DDEBUG -shared -fPIC -g
+CFLAGS = -m64 -O3 -DNDEBUG -shared -fPIC -g
 
 all: libqthread.so 
 

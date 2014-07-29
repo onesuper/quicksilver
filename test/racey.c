@@ -116,6 +116,7 @@ void* ThreadBody(void* tid)
     /* Optionally, yield to other processors (Solaris use sched_yield()) */
     /* pthread_yield(); */
   }
+
   return NULL;
 }
 
