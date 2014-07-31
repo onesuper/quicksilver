@@ -9,13 +9,13 @@
  */
 class List {
 
-private:
+ private:
   Entry *_head;
 
 public:
   List():
-    _head(NULL)
-    {}
+  _head(NULL)
+  {}
 
 
   void insertTail(Entry *entry) {

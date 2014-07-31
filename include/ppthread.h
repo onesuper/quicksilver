@@ -5,6 +5,7 @@
 #include <dlfcn.h>
 #include <assert.h>
 #include <stdio.h>
+
 #include "debug.h"
 #include "error.h"
 
@@ -17,8 +18,8 @@ typedef void *ThreadFunction(void *);
  * The Pthread class has only one instance, which is initialized when first use
  */
 class Pthread {
-private:
-  
+ private:
+
   // File handle to the opened libpthread
   void *_pthread_handle;
 
@@ -54,26 +55,26 @@ private:
 public:
  // constructor
   Pthread():
-    _pthread_create(NULL),
-    _pthread_cancel(NULL),
-    _pthread_join(NULL),
-    _pthread_exit(NULL),
-    _pthread_mutexattr_init(NULL),
-    _pthread_mutex_init(NULL),
-    _pthread_mutex_lock(NULL),
-    _pthread_mutex_unlock(NULL),
-    _pthread_mutex_trylock(NULL),
-    _pthread_mutex_destroy(NULL),
-    _pthread_condattr_init(NULL),
-    _pthread_cond_init(NULL),
-    _pthread_cond_wait(NULL),
-    _pthread_cond_signal(NULL),
-    _pthread_cond_broadcast(NULL),
-    _pthread_cond_destroy(NULL),
-    _pthread_barrier_init(NULL),
-    _pthread_barrier_wait(NULL),
-    _pthread_barrier_destroy(NULL)
-    {}
+  _pthread_create(NULL),
+  _pthread_cancel(NULL),
+  _pthread_join(NULL),
+  _pthread_exit(NULL),
+  _pthread_mutexattr_init(NULL),
+  _pthread_mutex_init(NULL),
+  _pthread_mutex_lock(NULL),
+  _pthread_mutex_unlock(NULL),
+  _pthread_mutex_trylock(NULL),
+  _pthread_mutex_destroy(NULL),
+  _pthread_condattr_init(NULL),
+  _pthread_cond_init(NULL),
+  _pthread_cond_wait(NULL),
+  _pthread_cond_signal(NULL),
+  _pthread_cond_broadcast(NULL),
+  _pthread_cond_destroy(NULL),
+  _pthread_barrier_init(NULL),
+  _pthread_barrier_wait(NULL),
+  _pthread_barrier_destroy(NULL)
+  {}
 
   void init() {
 
@@ -89,8 +90,8 @@ public:
 
     // Bind pthread calls to our own references
 #define LOAD_SYM(name) \
-          _##name = (typeof(_##name)) dlsym(_pthread_handle, #name); \
-          assert(_##name != NULL);
+    _##name = (typeof(_##name)) dlsym(_pthread_handle, #name); \
+    assert(_##name != NULL);
 
     LOAD_SYM(pthread_create);
     LOAD_SYM(pthread_cancel);

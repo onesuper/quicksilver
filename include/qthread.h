@@ -3,6 +3,7 @@
 
 #include <new>
 #include <sched.h>
+
 #include "ppthread.h"  // our pthread header
 #include "list.h"
 #include "thread_entry.h"
@@ -39,11 +40,11 @@ private:
 public:
 
   Qthread():
-    _token_entry(NULL),
-    _max_thread_entries(MAX_THREADS),
-    _stat_total(),
-    _stat_serial()
-    {}
+  _token_entry(NULL),
+  _max_thread_entries(MAX_THREADS),
+  _stat_total(),
+  _stat_serial()
+  {}
 
   // Singleton pattern
   static Qthread& getInstance(void) {
@@ -55,7 +56,7 @@ public:
   }
 
   void init() {
- 
+   
     _stat_total.start();  
 
 #ifdef DEBUG    
@@ -73,8 +74,8 @@ public:
   void del() {
     _stat_total.pause();
 
-  	printf("Total Time: %ld\n", _stat_total.getTotal());
-  	printf("Serial Time: %ld @ %ld\n", _stat_serial.getTotal(), _stat_serial.getTimes());  
+    printf("Total Time: %ld\n", _stat_total.getTotal());
+    printf("Serial Time: %ld @ %ld\n", _stat_serial.getTotal(), _stat_serial.getTimes());  
 
 #ifdef DEBUG
     whoHasToken();
@@ -105,90 +106,90 @@ public:
   // Force thread tid pass his token to the next thread in the active list
   void passToken(void) {
 
-	  assert(_token_entry != NULL);
+   assert(_token_entry != NULL);
 
 #ifdef DEBUG	  
-	  _activelist.print();
+   _activelist.print();
 #endif
-	  
-	  _stat_serial.pause();
-	  
-    lock();
+   
+   _stat_serial.pause();
+   
+   lock();
     // Do I have token?
-    if (my_tid() != _token_entry->getIndex()) {
-      unlock();
-      ERROR("Error! <%d> attempts to pass token but the token belongs to %d", my_tid(), _token_entry->getIndex());
-      assert(0);
-    }
-
-    ThreadEntry *next = (ThreadEntry *) _token_entry->next;
-    _token_entry = next;
-    DEBUG("<%d> Token is now passed to %d", my_tid(), _token_entry->getIndex());
-
+   if (my_tid() != _token_entry->getIndex()) {
     unlock();
-
-    return;
+    ERROR("Error! <%d> attempts to pass token but the token belongs to %d", my_tid(), _token_entry->getIndex());
+    assert(0);
   }
 
+  ThreadEntry *next = (ThreadEntry *) _token_entry->next;
+  _token_entry = next;
+  DEBUG("<%d> Token is now passed to %d", my_tid(), _token_entry->getIndex());
 
-	void whoHasToken(void) {
-		DEBUG("Who has the token?");
-		
-		if (_token_entry != NULL) {
-    	_token_entry->print();
-    } else {
-      DEBUG("No one!");
-    }
-	}
+  unlock();
+
+  return;
+}
 
 
-  void registerThread(int tid) {
+void whoHasToken(void) {
+  DEBUG("Who has the token?");
+  
+  if (_token_entry != NULL) {
+   _token_entry->print();
+ } else {
+  DEBUG("No one!");
+}
+}
 
-    lock();
-    
-    DEBUG("Registering thread %d ...", tid);
+
+void registerThread(int tid) {
+
+  lock();
+  
+  DEBUG("Registering thread %d ...", tid);
 
     // Create a new threadEntry in the memory already allocated  
     // allocThreadEntry() just return a position in an array
-    void *ptr = allocThreadEntry(tid);
-    ThreadEntry *entry = new (ptr) ThreadEntry(tid);
+  void *ptr = allocThreadEntry(tid);
+  ThreadEntry *entry = new (ptr) ThreadEntry(tid);
 
     // Link the newly created threadEntry into the active thread list
-    _activelist.insertTail(entry);
+  _activelist.insertTail(entry);
 
     // Initially, token belongs to the first created thread
-    if (_token_entry == NULL) {
-      _token_entry = entry;
-    }
-    
+  if (_token_entry == NULL) {
+    _token_entry = entry;
+  }
+  
 #ifdef DEBUG
     // Print out the active list
-    _activelist.print();
-    whoHasToken();
+  _activelist.print();
+  whoHasToken();
 #endif
 
-    unlock();
-  }
+  unlock();
+}
 
-  void deregisterThread(int index) {
+void deregisterThread(int index) {
 
-    waitForToken();
-    DEBUG("Deregistering thread %d ...", index);
-        
-	  ThreadEntry* entry = &_thread_entries[index];
-    ThreadEntry* next = (ThreadEntry *) entry->next;
-    lock();    
-    
+  waitForToken();
+  DEBUG("Deregistering thread %d ...", index);
+  
+  ThreadEntry* entry = &_thread_entries[index];
+  ThreadEntry* next = (ThreadEntry *) entry->next;
+  lock();    
+  
     // Remove the entry from active list
-		_activelist.remove(entry);
+  _activelist.remove(entry);
 
 #ifdef DEBUG		
-    _activelist.print();
+  _activelist.print();
 #endif
-    
+  
     // Free the thread entry
-    freeThreadEntry(entry);
-	  
+  freeThreadEntry(entry);
+  
     // After deleting thread entry, pass the token (if hold).
     if (index != _token_entry->getIndex()) { // Check whether holds token
       unlock();
@@ -197,8 +198,8 @@ public:
       // Try to pass the token
       if (entry == next) { // Get back the token if there's only one thread before deleting
         _token_entry = NULL;
-        unlock();
-        DEBUG("Since there is no thread left, token is called back");
+      unlock();
+      DEBUG("Since there is no thread left, token is called back");
       } else { // Else pass the token
         _token_entry = next;
         unlock();
@@ -210,11 +211,11 @@ public:
   }
 
   int exit(void *val_ptr) {
-  
+    
     // Deregister the thread if user call exit() manually in his code
     
     deregisterThread(my_tid());
- 
+    
 
     return Pthread::getInstance()._exit(val_ptr);
   }

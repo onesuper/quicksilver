@@ -41,11 +41,11 @@ public:
     double cycles = 0.0;
     
     cycles = (double) (_end.low - _start.low) + (double) (UINT_MAX) 
-      * (double) (_end.high - _start.high);
-   
+    * (double) (_end.high - _start.high);
+    
     if (_end.low < _start.low)
       cycles -= (double) UINT_MAX;
-      
+    
     return cycles;
   }
   
@@ -55,8 +55,8 @@ public:
     double cycles = 0.0;
     
     cycles = (double) (_end.low - _start.low) + (double) (UINT_MAX) 
-      * (double) (_end.high - _start.high);
-   
+    * (double) (_end.high - _start.high);
+    
     if (_end.low < _start.low)
       cycles -= (double) UINT_MAX;
     
