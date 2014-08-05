@@ -1,67 +1,39 @@
 #pragma once
 
-#include <limits.h>
 
 // cycle per millis
-// e.g. 1GHz = 1000 000 000 cycle/s 
-#define CPU_FREQ 1
-
-typedef struct {
-  unsigned int high;
-  unsigned int low;
-} timeinfo_t;
+// e.g. 1GHz = 1000 000 cycle/ millis 
+#define CPU_FREQ 1000000
 
 
+typedef unsigned long long timestamp_t;
 
 class Timer {
 
 private:
-  timeinfo_t _start;
-  timeinfo_t _end;
+  timestamp_t _start;
+  timestamp_t _end;
 
-  void __get_time(timeinfo_t &ti) {
-    unsigned int l, h;
-    asm volatile ("rdtsc" : "=a"(l), "=d"(h));
-    ti.low = l;
-    ti.high = h;
+  static inline timestamp_t _now(void) {
+    unsigned int lo, hi;
+    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((timestamp_t) lo) | (((timestamp_t) hi) << 32);
   }
 
 public:
 
-  void start(void) {
-    __get_time(_start);
+  void Start(void) {
+    _start = _now();
     return;
   }
   
-  void stop(void) {
-    __get_time(_end);
-  }
-
-  double elapsedCycles(void) {
-    double cycles = 0.0;
-    
-    cycles = (double) (_end.low - _start.low) + (double) (UINT_MAX) 
-    * (double) (_end.high - _start.high);
-    
-    if (_end.low < _start.low)
-      cycles -= (double) UINT_MAX;
-    
-    return cycles;
+  void Stop(void) {
+    _end = _now();
   }
   
-  
-  unsigned long elapsedMillis(void) {
-    unsigned long millis;
-    double cycles = 0.0;
-    
-    cycles = (double) (_end.low - _start.low) + (double) (UINT_MAX) 
-    * (double) (_end.high - _start.high);
-    
-    if (_end.low < _start.low)
-      cycles -= (double) UINT_MAX;
-    
-    millis = (unsigned long) (cycles / CPU_FREQ);
-    
+  double ElapsedMillis(void) {
+    double millis;
+    millis = (double) (_end - _start) / (double) CPU_FREQ;
     return millis;
   }
 
