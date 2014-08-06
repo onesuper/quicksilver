@@ -4,8 +4,8 @@
 
 
 
-// A lock used in this file
-pthread_mutex_t g_lock;
+// Global: used to pass thread's parameters when spawning thread
+pthread_mutex_t spawn_lock;
 
 
  
@@ -17,7 +17,7 @@ pthread_mutex_t g_lock;
  
   DEBUG("Registering pthread instance");
   init_pthread_reference();
-  ppthread_mutex_init(&g_lock, NULL);
+  ppthread_mutex_init(&spawn_lock, NULL);
   Qthread::GetInstance().Init();
 }
 
@@ -28,26 +28,23 @@ void after_everyting() {
 #endif
 
 
-
-
 /**
  * Shims to call replaced pthread subroutines
  */
 extern "C" {
-
   // pthread basic
   int pthread_create(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction func, void *arg) {
     
     static size_t thread_count = 0;
-		size_t index;
+		volatile size_t index;
 		
-
     // Ensure the safety of thread_param
-    ppthread_mutex_lock(&g_lock);
+    ppthread_mutex_lock(&spawn_lock);
 
     // Use gcc atomic operation to increment id
     //index = __sync_fetch_and_add(&thread_count, 1);    
     index = thread_count++;
+    DEBUG("Spawning thread %ld", index);  
 
     // Hook up the thread function and arguments
     thread_param.index = index;
@@ -57,21 +54,16 @@ extern "C" {
     // Register before spawning
     Qthread::GetInstance().RegisterThread(index);
 
-    int retval = ppthread_create(tid, attr, ThreadFuncWrapper, &thread_param);
-    
-    DEBUG("Thread %ld is spawned", index);  
-      
+    int retval = ppthread_create(tid, attr, ThreadFuncWrapper, &thread_param);     
     return retval;
-    
   }
 
   int pthread_cancel(pthread_t tid) {
-    DEBUG("<%lu> call pthread_cancel", my_tid);
+    DEBUG("call pthread_cancel");
     return ppthread_cancel(tid);
   }
 
   int pthread_join(pthread_t tid, void **val) {
-    DEBUG("<%lu> call pthread_join", my_tid);
     return ppthread_join(tid, val);
   }
 
@@ -107,7 +99,31 @@ extern "C" {
     return Qthread::GetInstance().MutexDestroy(mutex);  
   }
 
+  // pthread spin
+  int pthread_spin_init(pthread_spinlock_t *spinner, int shared) {
+    DEBUG("Call replaced pthread_spin_init");
+    return Qthread::GetInstance().SpinInit(spinner, shared);
+  }
 
+  int pthread_spin_lock(pthread_spinlock_t *spinner) {
+    DEBUG("Call replaced pthread_spin_lock");
+    return Qthread::GetInstance().SpinLock(spinner);
+  }
+
+  int pthread_spin_unlock(pthread_spinlock_t *spinner) {
+    DEBUG("Call replaced pthread_spin_unlock");
+    return Qthread::GetInstance().SpinUnlock(spinner);
+  }
+
+  int pthread_spin_trylock(pthread_spinlock_t *spinner) {
+    DEBUG("Call replaced pthread_spin_trylock");
+    return Qthread::GetInstance().SpinTrylock(spinner);
+  }
+
+  int pthread_spin_destroy(pthread_spinlock_t *spinner) {
+    DEBUG("Call replaced pthread_spin_destroy");
+    return Qthread::GetInstance().SpinDestroy(spinner);
+  }
 
   // pthread condition variables
   int pthread_cond_init(pthread_cond_t * cond, const pthread_condattr_t *attr) {

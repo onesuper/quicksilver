@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-pthread_mutex_t g_lock;
+pthread_spinlock_t g_lock;
 
 
 void do_something(void) {
@@ -12,11 +12,11 @@ void do_something(void) {
 
 
 void *worker(void *data) {
-  pthread_mutex_lock(&g_lock);
+  pthread_spin_lock(&g_lock);
 
   do_something();
 
-  pthread_mutex_unlock(&g_lock);
+  pthread_spin_unlock(&g_lock);
 
   do_something();
   //pthread_exit(0);
@@ -27,7 +27,7 @@ void *worker(void *data) {
 
 int main(int argc, char **argv) {
 
-  pthread_mutex_init(&g_lock, NULL);
+  pthread_spin_init(&g_lock, PTHREAD_PROCESS_PRIVATE);
 
   const int nThreads = 4;
   pthread_t workers[nThreads];

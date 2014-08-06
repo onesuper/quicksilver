@@ -22,7 +22,14 @@ int (*ppthread_mutex_unlock)(pthread_mutex_t *);
 int (*ppthread_mutex_trylock)(pthread_mutex_t *);
 int (*ppthread_mutex_destroy)(pthread_mutex_t *);
 
-// pthread mutexes
+// pthread spin
+int (*ppthread_spin_init)(pthread_spinlock_t *, int);
+int (*ppthread_spin_lock)(pthread_spinlock_t *);
+int (*ppthread_spin_unlock)(pthread_spinlock_t *);
+int (*ppthread_spin_trylock)(pthread_spinlock_t *);
+int (*ppthread_spin_destroy)(pthread_spinlock_t *);
+
+// pthread cond
 int (*ppthread_cond_init)(pthread_cond_t *, const pthread_condattr_t *);
 int (*ppthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
 int (*ppthread_cond_signal)(pthread_cond_t *);
@@ -61,6 +68,12 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_mutex_trylock, pthread_handle);
   LOAD_SYM(pthread_mutex_destroy, pthread_handle);
   
+  LOAD_SYM(pthread_spin_init, pthread_handle);
+  LOAD_SYM(pthread_spin_lock, pthread_handle);
+  LOAD_SYM(pthread_spin_unlock, pthread_handle);
+  LOAD_SYM(pthread_spin_trylock, pthread_handle);
+  LOAD_SYM(pthread_spin_destroy, pthread_handle);
+
   LOAD_SYM(pthread_cond_init, pthread_handle);
   LOAD_SYM(pthread_cond_wait, pthread_handle);
   LOAD_SYM(pthread_cond_signal, pthread_handle);
@@ -71,7 +84,8 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_barrier_wait, pthread_handle);
   LOAD_SYM(pthread_barrier_destroy, pthread_handle);
 
-  //dlclose(pthread_handle);
+  // bind after close
+  dlclose(pthread_handle);
 }
 
 

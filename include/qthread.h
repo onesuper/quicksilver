@@ -6,7 +6,7 @@
 
 #include "ppthread.h" 
 #include "debug.h"
-#include "stat.h"
+#include "timer.h"
 
 
 // Thread local storage: use to let thread know who he is
@@ -17,7 +17,8 @@ class Qthread {
 
 private:
   // Used to manage threads
-  struct ThreadEntry {
+  class ThreadEntry {
+  public:
     size_t tid;
     ThreadEntry() {}
     ThreadEntry(size_t _tid): tid(_tid) {}
@@ -34,9 +35,9 @@ private:
   pthread_mutex_t _mutex;
 
 
-  // Statistical info
-  Stat _stat_total;
-  Stat _stat_serial;
+  // Timing info
+  Timer _stat_total;
+  Timer _stat_serial;
   
 
 public:
@@ -148,7 +149,6 @@ public:
   }
 
 
-
   int MutexInit(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
     return ppthread_mutex_init(mutex, attr);
   }
@@ -185,16 +185,71 @@ public:
 
   int MutexTrylock(pthread_mutex_t *mutex) {
 
-    //int retval = ppthread_mutex_trylock(mutex);
+    _stat_serial.Start();
+    int retval = -1;
 
-    return 0;
+    // Wait for the token
+    while (true) {				  
+      // Acqurie the lock anyway
+      retval = ppthread_mutex_trylock(mutex);
+      DEBUG("Thread %lu grabs the token", my_tid);
+		  
+      // Check whether I have the token
+      if (my_tid != tokenIndex()) {
+        // if I have no token, yield the lock
+        DEBUG("Thread %lu yields the lock since he has no token (%lu)", my_tid, tokenIndex());
+        ppthread_mutex_unlock(mutex); 
+      } else {
+        break;
+      }
+    }    
+
+    _stat_serial.Pause();        
+    passToken();
+    return retval;
   }
-
 
   int MutexDestroy(pthread_mutex_t *mutex) {
     return ppthread_mutex_destroy(mutex);
   }
 
+  // spin
+  int SpinInit(pthread_spinlock_t *spinner, int shared) {
+    return ppthread_spin_init(spinner, shared);
+  }
+
+  int SpinLock(pthread_spinlock_t *spinner) {
+
+    _stat_serial.Start();
+    spinForToken();
+    DEBUG("<%lu> call real pthread spin lock", my_tid);
+    int retval = ppthread_spin_lock(spinner);
+    _stat_serial.Pause();        
+    passToken();
+    return retval;
+  }
+
+  int SpinUnlock(pthread_spinlock_t *spinner) {
+    DEBUG("<%lu> call real pthread spin unlock", my_tid);
+    return ppthread_spin_unlock(spinner);
+  }
+
+  int SpinTrylock(pthread_spinlock_t *spinner) {
+    _stat_serial.Start();
+    spinForToken();
+    DEBUG("<%lu> call real pthread spin trylock", my_tid);
+    int retval = ppthread_spin_trylock(spinner);
+    _stat_serial.Pause();        
+    passToken();
+    return retval;
+  }
+
+  int SpinDestroy(pthread_spinlock_t *spinner) {
+    return ppthread_spin_destroy(spinner);
+  }
+
+
+  // Cond
   int CondInit(pthread_cond_t *cond, const pthread_condattr_t *attr) {
     return 0;
   }
@@ -245,12 +300,9 @@ private:
   // Force thread tid pass his token to the next thread in the active list
   void passToken(void) {
 
-    assert(_token_pos >= 0);
-
-
     lock();
 
-    // Do I have token?
+    // Do I have token? (Must be called by the token owner)
     if (my_tid != tokenIndex()) {
       unlock();
       DEBUG("Error! <%lu> attempts to pass token but the token belongs to %lu", my_tid, tokenIndex());
@@ -259,14 +311,14 @@ private:
     }
 
     _token_pos = (_token_pos + 1) % _active_entries.size();
-    DEBUG("<%lu> Token is now passed to %lu", my_tid, tokenIndex());
 
+    DEBUG("<%lu> Token is now passed to %lu", my_tid, tokenIndex());
     unlock();
     return;
   }
 
 
-  size_t tokenIndex() {
+  size_t tokenIndex() const {
     assert(_token_pos >= 0);
     assert(_token_pos < _active_entries.size());
     return _active_entries[_token_pos].tid;
@@ -286,14 +338,13 @@ private:
   
   void printActiveEntries(void) {
     DEBUG("Printing the active entries...")
-    std::vector<ThreadEntry>::size_type i;
-    for (i=0; i<_active_entries.size(); i++) {
+    for (int i=0; i<_active_entries.size(); i++) {
       DEBUG("%lu", _active_entries[i].tid);
     }
     return;
   }
 
-public:
+
   inline void lock(void) {
     ppthread_mutex_lock(&_mutex);
     return;
