@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _PPTHREAD_H_
+#define _PPTHREAD_H_
 
 #include <sys/types.h>
 #include <dlfcn.h>
@@ -7,8 +8,10 @@
 // Pthread thread body
 typedef void *ThreadFunction(void *);
 
-// Defining global function pointers for calling real pthread functions
 
+/**
+ * Defining global function pointers for calling real pthread functions
+ */
 // pthread basic
 int (*ppthread_create)(pthread_t *, const pthread_attr_t *, ThreadFunction *, void *);
 int (*ppthread_cancel)(pthread_t);
@@ -57,8 +60,8 @@ void init_pthread_reference() {
     assert(0);
   }
 
-	LOAD_SYM(pthread_create, pthread_handle);
-	LOAD_SYM(pthread_cancel, pthread_handle);
+  LOAD_SYM(pthread_create, pthread_handle);
+  LOAD_SYM(pthread_cancel, pthread_handle);
   LOAD_SYM(pthread_exit, pthread_handle);
   LOAD_SYM(pthread_join, pthread_handle);
   
@@ -84,10 +87,10 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_barrier_wait, pthread_handle);
   LOAD_SYM(pthread_barrier_destroy, pthread_handle);
 
-  // bind after close
+  // close after binding
   dlclose(pthread_handle);
 }
 
 
-    
-
+  
+#endif

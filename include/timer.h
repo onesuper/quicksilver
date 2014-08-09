@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _TIMER_H_
+#define _TIMER_H_
 
 
 // cycle per millis
@@ -27,7 +28,6 @@ private:
   }
 
 public:
-
   Timer(): _total(0), _start_times(0), _start(0), _end(0) {}
 
   void Start(void) {
@@ -57,4 +57,4 @@ public:
 };
 
 
-
+#endif
