@@ -18,6 +18,8 @@ void *thread1(void *data) {
   pthread_mutex_lock(&lockA);
 
   do_something();
+  printf("%lu is entering LockA's section\n", pthread_self());
+
 
   pthread_mutex_unlock(&lockA);
 
@@ -35,13 +37,19 @@ void *thread2(void *data) {
 
   do_something();
 
-  pthread_mutex_lock(&lockB);
-
-  do_something();
+  printf("%lu is in LockA's section\n", pthread_self());
 
   pthread_mutex_lock(&lockB);
 
   do_something();
+
+  printf("%lu is entering LockB's section\n", pthread_self());
+
+  pthread_mutex_unlock(&lockB);
+
+  do_something();
+
+  printf("%lu is in another LockA's section\n", pthread_self());
 
   pthread_mutex_unlock(&lockA);
 
@@ -56,14 +64,16 @@ int main(int argc, char **argv) {
   pthread_mutex_init(&lockA, NULL);
   pthread_mutex_init(&lockB, NULL);
 
-  pthread_t workers[2];
+  pthread_t worker0;
 
-  pthread_create(&workers[0], NULL, thread1, NULL);
-  pthread_create(&workers[1], NULL, thread2, NULL);
+  pthread_t worker1;
+
+  pthread_create(&worker0, NULL, thread2, NULL);
+  pthread_create(&worker1, NULL, thread1, NULL);
 
 
-  ppthread_join(workers[0], NULL);
-  ppthread_join(workers[1], NULL);
+  pthread_join(worker0, NULL);
+  pthread_join(worker1, NULL);
 
   return 0;
 }

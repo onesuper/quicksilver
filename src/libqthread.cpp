@@ -1,5 +1,5 @@
 #include "qthread.h"
-#include "thread_wrapper.h"
+#include "thread_param.h"
 #include "debug.h"
 
 
@@ -13,8 +13,14 @@ ThreadParam thread_param;
 // Used to keep the safety of parameters passed to each spawned thread 
 pthread_mutex_t spawn_lock;
 
+// Define the only Qthread instance
+Qthread Qthread::_instance;
+
 // Count the assigned thread id
 static volatile size_t thread_count = 0;
+
+// Replace pthread_self
+//extern size_t my_tid;
 
 /**
  * Fake entry point of thread. We use it to unregister thread inside the thread body
@@ -35,7 +41,7 @@ void *ThreadFuncWrapper(void *param) {
   void* retval = my_func(my_arg);
 
   // Let each thread deregister it self
-  Qthread::GetInstance().DeregisterThread();
+  Qthread::GetInstance().DeregisterMe();
 
   return retval;
 }
@@ -53,6 +59,8 @@ extern "C" {
     // Use gcc atomic operation to increment id
     index = __sync_fetch_and_add(&thread_count, 1);    
 
+    DEBUG("Spawning thread %ld", index);
+
     // Register before spawning
     Qthread::GetInstance().RegisterThread(index);
 
@@ -67,12 +75,15 @@ extern "C" {
     thread_param.func = func;
     thread_param.arg = arg;
 
-    DEBUG("Spawning thread %ld", index);
-
     // The unlock of spawn_lock is located in the ThreadFuncWrapper we passed to ppthread_create()
     int retval = ppthread_create(tid, attr, ThreadFuncWrapper, &thread_param);
 
     return retval;
+  }
+
+  pthread_t pthread_self(void) {
+    //return ppthread_self();
+    return my_tid;
   }
 
   int pthread_cancel(pthread_t tid) {
@@ -86,7 +97,7 @@ extern "C" {
 
   int pthread_exit(void *value_ptr) {
     DEBUG("<%lu> call pthread_exit", my_tid);
-    Qthread::GetInstance().DeregisterThread();
+    Qthread::GetInstance().DeregisterMe();
     return ppthread_exit(value_ptr);
   }
 

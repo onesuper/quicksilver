@@ -17,6 +17,7 @@ int (*ppthread_create)(pthread_t *, const pthread_attr_t *, ThreadFunction *, vo
 int (*ppthread_cancel)(pthread_t);
 int (*ppthread_join)(pthread_t, void **);
 int (*ppthread_exit)(void *);
+pthread_t (*ppthread_self)(void);
 
 // pthread mutexes
 int (*ppthread_mutex_init)(pthread_mutex_t *, const pthread_mutexattr_t *);
@@ -46,6 +47,7 @@ int (*ppthread_barrier_destroy)(pthread_barrier_t *);
 
 
 
+
 #define LOAD_SYM(name, handle) \
   p##name = (typeof(p##name)) dlsym(handle, #name); \
   assert(p##name != NULL);
@@ -56,7 +58,7 @@ void init_pthread_reference() {
   void *pthread_handle = dlopen("libpthread.so.0", RTLD_NOW);
   
   if (pthread_handle == NULL) {
-    DEBUG("%s", dlerror());
+    //DEBUG("%s", dlerror());
     assert(0);
   }
 
@@ -64,7 +66,8 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_cancel, pthread_handle);
   LOAD_SYM(pthread_exit, pthread_handle);
   LOAD_SYM(pthread_join, pthread_handle);
-  
+  LOAD_SYM(pthread_self, pthread_handle);  
+
   LOAD_SYM(pthread_mutex_init, pthread_handle);
   LOAD_SYM(pthread_mutex_lock, pthread_handle);
   LOAD_SYM(pthread_mutex_unlock, pthread_handle);

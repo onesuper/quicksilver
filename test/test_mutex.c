@@ -21,6 +21,8 @@ void *worker(void *data) {
 
     do_something();
 
+    printf("%lu is entering critial section %d\n", pthread_self(), i);
+
     pthread_mutex_unlock(&g_lock);
 
     do_something();

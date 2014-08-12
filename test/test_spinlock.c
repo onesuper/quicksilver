@@ -12,14 +12,23 @@ void do_something(void) {
 
 
 void *worker(void *data) {
-  pthread_spin_lock(&g_lock);
 
-  do_something();
+  int i;
 
-  pthread_spin_unlock(&g_lock);
+  for (i=0; i<5; i++)
+  {  
+  
+    if (i==3 && pthread_self()==2) pthread_exit(0);
 
-  do_something();
-  //pthread_exit(0);
+    pthread_spin_lock(&g_lock);
+
+    do_something();
+    printf("%lu is entering critical section %d\n", pthread_self(), i);
+    pthread_spin_unlock(&g_lock);
+
+    do_something();
+
+  }
 
   return NULL;
 }
