@@ -19,8 +19,6 @@ Qthread Qthread::_instance;
 // Count the assigned thread id
 static volatile size_t thread_count = 0;
 
-// Replace pthread_self
-//extern size_t my_tid;
 
 /**
  * Fake entry point of thread. We use it to unregister thread inside the thread body
@@ -64,7 +62,7 @@ extern "C" {
     // Register before spawning
     Qthread::GetInstance().RegisterThread(index);
 
-    // This lock is for the safety of thread_param
+    // This lock is just for the safety of 'thread_param' (global variable).
     // TODO: this lock will make the initialization of threads be *serialized*.
     // When we have a lot of threads to spawn, that may hurt performance.
     // Try to replace it with a better mechanism later.
@@ -81,6 +79,8 @@ extern "C" {
     return retval;
   }
 
+  // FIXME: Here I return my_tid for the convenience of tesing. 
+  // Replace it with original pthread_self() call in the release version
   pthread_t pthread_self(void) {
     //return ppthread_self();
     return my_tid;
@@ -127,7 +127,8 @@ extern "C" {
     return Qthread::GetInstance().MutexDestroy(mutex);  
   }
 
-  // pthread spin
+
+  // pthread spinlock
   int pthread_spin_init(pthread_spinlock_t *spinner, int shared) {
     return Qthread::GetInstance().SpinInit(spinner, shared);
   }
@@ -146,6 +147,44 @@ extern "C" {
 
   int pthread_spin_destroy(pthread_spinlock_t *spinner) {
     return Qthread::GetInstance().SpinDestroy(spinner);
+  }
+
+
+  // pthread rwlock
+  int pthread_rwlock_init(pthread_rwlock_t *rwlock, const pthread_rwlockattr_t * attr) {
+    return Qthread::GetInstance().RwLockInit(rwlock, attr);
+  }
+
+  int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().RdLock(rwlock);
+  }
+
+  int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().WrLock(rwlock);
+  }
+
+  int pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock, const struct timespec *timeout) {
+    return Qthread::GetInstance().TimedRdLock(rwlock, timeout);
+  }
+
+  int pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock, const struct timespec *timeout) {
+    return Qthread::GetInstance().TimedWrLock(rwlock, timeout);
+  }
+
+  int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().TryRdLock(rwlock);
+  }
+
+  int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().TryWrLock(rwlock);
+  }
+
+  int pthread_rwlock_unlock(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().RwUnLock(rwlock);
+  }
+
+  int pthread_rwlock_destroy(pthread_rwlock_t *rwlock) {
+    return Qthread::GetInstance().RwLockDestroy(rwlock);
   }
 
   // pthread condition variables

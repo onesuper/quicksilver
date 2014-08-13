@@ -26,6 +26,7 @@ void *worker(void *data) {
     pthread_mutex_unlock(&g_lock);
 
     do_something();
+    //sleep(1);
   }
   
   return NULL;

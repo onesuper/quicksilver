@@ -1,0 +1,46 @@
+# Registering pthread instance
+
+# Spawning thread 0
+# Register: 0
+Entries: 0,
+Token: 0 @ [0]
+# Spawning thread 1
+# Register: 1
+Entries: 0,1,
+Token: 0 @ [0]
+# Spawning thread 2
+# Register: 2
+Entries: 0,1,2,
+Token: 0 @ [0]
+0 is entering critical section 0 as a reader
+# Spawning thread 3
+# Register: 3
+Entries: 0,1,2,3,
+Token: 0 @ [0]
+1 is entering critical section 0 as a reader
+# WrLock: 2
+# WaitToken: 2
+# WrLock: 3
+# WaitToken: 3
+0 is leaving critical section 0 as a reader
+# RwUnlock: 0
+# WaitToken: 0
+# GetToken: 0
+# RwLockReleased: 0
+# PassToken: 0
+1 is leaving critical section 0 as a reader
+# RwUnlock: 1
+# WaitToken: 1
+# GetToken: 1
+# RwLockReleased: 1
+# PassToken: 1
+# GetToken: 2
+# WrLockAcquire: 2
+# PassToken: 2
+2 is entering critical section 0 as a writer
+# GetToken: 3
+# WrLockBusy: 3
+# PassToken: 3
+# WaitToken: 3
+2 is leaving critical section 0 as a writer
+# RwUnlock: 2

@@ -11,7 +11,16 @@ void do_something(void) {
 }
 
 
-void *worker(void *data) {
+void *child(void *data) {
+
+  do_something();
+
+  printf("in %lu\n", pthread_self());
+
+  return NULL;
+}
+
+void *parent(void *data) {
 
   do_something();
 
@@ -20,7 +29,7 @@ void *worker(void *data) {
   int i;
 
   for (i = 0; i < nThreads; i++)
-    pthread_create(&workers[i], NULL, worker, NULL);
+    pthread_create(&workers[i], NULL, child, NULL);
 
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);
@@ -40,7 +49,7 @@ int main(int argc, char **argv) {
   int i;
 
   for (i = 0; i < nThreads; i++)
-    pthread_create(&workers[i], NULL, worker, NULL);
+    pthread_create(&workers[i], NULL, parent, NULL);
 
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);

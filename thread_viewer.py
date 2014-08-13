@@ -1,12 +1,14 @@
 #!/user/python
 
+"""
+This script is used to visualize the timeline of threads
+"""
 
 import sys
 
 MAX_THREAD = 4
 NO_OP = "-"
 threads_timelines = [[] for i in range(MAX_THREAD)]
-
 
 
 if len(sys.argv) < 2:
@@ -22,12 +24,12 @@ finally:
   file_obj.close()
 
 
-
-
 time = 0
 for line in lines:
   if line.startswith("#"):
+    # Strip out the '#' character and whitespaces
     command = line[1:].strip()
+    # We can recogenized the pair: (command_type: thread_id)
     atoms = command.split(":")
     if len(atoms) > 1:
       command_type = atoms[0]
@@ -40,17 +42,18 @@ for line in lines:
           threads_timelines[i].append(NO_OP)
       time += 1
     else:
-      print atoms
+      print atoms  # Print out the atoms we can not parse
   else:
+    # Print out the sentences startswith non-#
     print line
 
 
-
+'''
 for i in range(MAX_THREAD):
   if len(threads_timelines[i]) == 0: continue
   print threads_timelines[i]
   print '\n'
-
+'''
 
 for t in range(time):
   print t,

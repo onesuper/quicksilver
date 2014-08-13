@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <dlfcn.h>
+#include <time.h>
 #include <assert.h>
 
 // Pthread thread body
@@ -33,6 +34,18 @@ int (*ppthread_spin_unlock)(pthread_spinlock_t *);
 int (*ppthread_spin_trylock)(pthread_spinlock_t *);
 int (*ppthread_spin_destroy)(pthread_spinlock_t *);
 
+// pthread rwlock
+int (*ppthread_rwlock_init)(pthread_rwlock_t *, const pthread_rwlockattr_t *);
+int (*ppthread_rwlock_rdlock)(pthread_rwlock_t *);
+int (*ppthread_rwlock_wrlock)(pthread_rwlock_t *);
+int (*ppthread_rwlock_timedrdlock)(pthread_rwlock_t *, const struct timespec *);
+int (*ppthread_rwlock_timedwrlock)(pthread_rwlock_t *, const struct timespec *);
+int (*ppthread_rwlock_tryrdlock)(pthread_rwlock_t *);
+int (*ppthread_rwlock_trywrlock)(pthread_rwlock_t *);
+int (*ppthread_rwlock_unlock)(pthread_rwlock_t *);
+int (*ppthread_rwlock_destroy)(pthread_rwlock_t *);
+
+
 // pthread cond
 int (*ppthread_cond_init)(pthread_cond_t *, const pthread_condattr_t *);
 int (*ppthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
@@ -44,8 +57,6 @@ int (*ppthread_cond_destroy)(pthread_cond_t *);
 int (*ppthread_barrier_init)(pthread_barrier_t *, const pthread_barrierattr_t *, unsigned int);
 int (*ppthread_barrier_wait)(pthread_barrier_t *);
 int (*ppthread_barrier_destroy)(pthread_barrier_t *);
-
-
 
 
 #define LOAD_SYM(name, handle) \
@@ -79,6 +90,16 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_spin_unlock, pthread_handle);
   LOAD_SYM(pthread_spin_trylock, pthread_handle);
   LOAD_SYM(pthread_spin_destroy, pthread_handle);
+
+  LOAD_SYM(pthread_rwlock_init, pthread_handle);
+  LOAD_SYM(pthread_rwlock_rdlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_wrlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_timedrdlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_timedwrlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_tryrdlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_trywrlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_unlock, pthread_handle);  
+  LOAD_SYM(pthread_rwlock_destroy, pthread_handle);
 
   LOAD_SYM(pthread_cond_init, pthread_handle);
   LOAD_SYM(pthread_cond_wait, pthread_handle);
