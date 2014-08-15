@@ -23,14 +23,14 @@ static volatile size_t thread_count = 0;
 /**
  * Fake entry point of thread. We use it to unregister thread inside the thread body
  */
-void *ThreadFuncWrapper(void *param) {
+void * ThreadFuncWrapper(void * param) {
 
-  ThreadParam *obj = static_cast<ThreadParam *>(param);
+  ThreadParam * obj = static_cast<ThreadParam *>(param);
   
   // Dump parameters
   my_tid = obj->index;
-  Func *my_func = obj->func;
-  void *my_arg = (void *) obj->arg;
+  Func * my_func = obj->func;
+  void * my_arg = (void *) obj->arg;
 
   // Unlock after copying out paramemters
   ppthread_mutex_unlock(&spawn_lock);
@@ -39,7 +39,7 @@ void *ThreadFuncWrapper(void *param) {
   void* retval = my_func(my_arg);
 
   // Let each thread deregister it self
-  Qthread::GetInstance().DeregisterMe();
+  Qthread::GetInstance().DeregisterThread(my_tid);
 
   return retval;
 }
@@ -50,7 +50,7 @@ void *ThreadFuncWrapper(void *param) {
  */
 extern "C" {
   // pthread basic
-  int pthread_create(pthread_t *tid, const pthread_attr_t *attr, ThreadFunction func, void *arg) {
+  int pthread_create(pthread_t * tid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
     
     size_t index;
     
@@ -91,133 +91,133 @@ extern "C" {
     return ppthread_cancel(tid);
   }
 
-  int pthread_join(pthread_t tid, void **val) {
+  int pthread_join(pthread_t tid, void ** val) {
     return ppthread_join(tid, val);
   }
 
-  int pthread_exit(void *value_ptr) {
+  int pthread_exit(void * value_ptr) {
     DEBUG("<%lu> call pthread_exit", my_tid);
-    Qthread::GetInstance().DeregisterMe();
+    Qthread::GetInstance().DeregisterThread(my_tid);
     return ppthread_exit(value_ptr);
   }
 
   // pthread mutex
-  int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
+  int pthread_mutex_init(pthread_mutex_t * mutex, const pthread_mutexattr_t  *attr) {
     return Qthread::GetInstance().MutexInit(mutex, attr);
   }
 
-  int pthread_mutex_lock(pthread_mutex_t *mutex) {
+  int pthread_mutex_lock(pthread_mutex_t * mutex) {
     return Qthread::GetInstance().MutexLock(mutex);
   }
   
   // Provide a novel api to support "wait" version mutex lock
-  int pthread_mutex_waitlock(pthread_mutex_t *mutex) {
+  int pthread_mutex_waitlock(pthread_mutex_t * mutex) {
     return Qthread::GetInstance().MutexWaitLock(mutex);
   }  
 
-  int pthread_mutex_unlock(pthread_mutex_t *mutex) {
+  int pthread_mutex_unlock(pthread_mutex_t * mutex) {
     return Qthread::GetInstance().MutexUnlock(mutex);
   }
 
-  int pthread_mutex_trylock(pthread_mutex_t *mutex) {
+  int pthread_mutex_trylock(pthread_mutex_t * mutex) {
     return Qthread::GetInstance().MutexTrylock(mutex);
   }
 
-  int pthread_mutex_destory(pthread_mutex_t *mutex) {
+  int pthread_mutex_destory(pthread_mutex_t * mutex) {
     return Qthread::GetInstance().MutexDestroy(mutex);  
   }
 
 
   // pthread spinlock
-  int pthread_spin_init(pthread_spinlock_t *spinner, int shared) {
+  int pthread_spin_init(pthread_spinlock_t * spinner, int shared) {
     return Qthread::GetInstance().SpinInit(spinner, shared);
   }
 
-  int pthread_spin_lock(pthread_spinlock_t *spinner) {
+  int pthread_spin_lock(pthread_spinlock_t * spinner) {
     return Qthread::GetInstance().SpinLock(spinner);
   }
 
-  int pthread_spin_unlock(pthread_spinlock_t *spinner) {
+  int pthread_spin_unlock(pthread_spinlock_t * spinner) {
     return Qthread::GetInstance().SpinUnlock(spinner);
   }
 
-  int pthread_spin_trylock(pthread_spinlock_t *spinner) {
+  int pthread_spin_trylock(pthread_spinlock_t * spinner) {
     return Qthread::GetInstance().SpinTrylock(spinner);
   }
 
-  int pthread_spin_destroy(pthread_spinlock_t *spinner) {
+  int pthread_spin_destroy(pthread_spinlock_t * spinner) {
     return Qthread::GetInstance().SpinDestroy(spinner);
   }
 
 
   // pthread rwlock
-  int pthread_rwlock_init(pthread_rwlock_t *rwlock, const pthread_rwlockattr_t * attr) {
+  int pthread_rwlock_init(pthread_rwlock_t * rwlock, const pthread_rwlockattr_t * attr) {
     return Qthread::GetInstance().RwLockInit(rwlock, attr);
   }
 
-  int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_rdlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().RdLock(rwlock);
   }
 
-  int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_wrlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().WrLock(rwlock);
   }
 
-  int pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock, const struct timespec *timeout) {
+  int pthread_rwlock_timedrdlock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
     return Qthread::GetInstance().TimedRdLock(rwlock, timeout);
   }
 
-  int pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock, const struct timespec *timeout) {
+  int pthread_rwlock_timedwrlock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
     return Qthread::GetInstance().TimedWrLock(rwlock, timeout);
   }
 
-  int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_tryrdlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().TryRdLock(rwlock);
   }
 
-  int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_trywrlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().TryWrLock(rwlock);
   }
 
-  int pthread_rwlock_unlock(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_unlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().RwUnLock(rwlock);
   }
 
-  int pthread_rwlock_destroy(pthread_rwlock_t *rwlock) {
+  int pthread_rwlock_destroy(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().RwLockDestroy(rwlock);
   }
 
   // pthread condition variables
-  int pthread_cond_init(pthread_cond_t * cond, const pthread_condattr_t *attr) {
+  int pthread_cond_init(pthread_cond_t * cond, const pthread_condattr_t * attr) {
     return Qthread::GetInstance().CondInit(cond, attr);
   }
 
-  int pthread_cond_wait(pthread_cond_t * cond, pthread_mutex_t *mutex) {
+  int pthread_cond_wait(pthread_cond_t * cond, pthread_mutex_t * mutex) {
     return Qthread::GetInstance().CondWait(cond, mutex);
   }
 
-  int pthread_cond_signal(pthread_cond_t *cond) {
+  int pthread_cond_signal(pthread_cond_t * cond) {
     return Qthread::GetInstance().CondSignal(cond);  
   }
 
-  int pthread_cond_broadcast(pthread_cond_t *cond) {
+  int pthread_cond_broadcast(pthread_cond_t * cond) {
     return Qthread::GetInstance().CondBroadcast(cond);  
   }
 
-  int pthread_cond_destroy(pthread_cond_t *cond) {
+  int pthread_cond_destroy(pthread_cond_t * cond) {
     return Qthread::GetInstance().CondDestroy(cond);
   }
 
   // pthread barrier
-  int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count) {
+  int pthread_barrier_init(pthread_barrier_t * barrier, const pthread_barrierattr_t * attr, unsigned int count) {
     return Qthread::GetInstance().BarrierInit(barrier, attr, count);
   }
 
-  int pthread_barrier_wait(pthread_barrier_t *barrier) {
+  int pthread_barrier_wait(pthread_barrier_t * barrier) {
     return Qthread::GetInstance().BarrierWait(barrier);
   }
 
-  int pthread_barrier_destroy(pthread_barrier_t *barrier) {
+  int pthread_barrier_destroy(pthread_barrier_t * barrier) {
     return Qthread::GetInstance().BarrierDestroy(barrier);
   }
 

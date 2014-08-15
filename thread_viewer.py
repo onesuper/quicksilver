@@ -2,6 +2,7 @@
 
 """
 This script is used to visualize the timeline of threads
+It can read data from stdin or an existing file
 """
 
 import sys
@@ -11,20 +12,18 @@ NO_OP = "-"
 threads_timelines = [[] for i in range(MAX_THREAD)]
 
 
-if len(sys.argv) < 2:
-  print "wrong argument"
-  sys.exit()
-
-
-file_obj = open(sys.argv[1])
-
-try:
-  lines = file_obj.readlines()
-finally:
-  file_obj.close()
+if len(sys.argv) < 2: # read data from stdin
+  lines = sys.stdin.readlines() 
+else:  # read data from file (given by argv[1])
+  file_obj = open(sys.argv[1])
+  try:
+    lines = file_obj.readlines()
+  finally:
+    file_obj.close()
 
 
 time = 0
+
 for line in lines:
   if line.startswith("#"):
     # Strip out the '#' character and whitespaces
@@ -61,3 +60,25 @@ for t in range(time):
     print threads_timelines[i][t], 
     print '\t\t\t',
   print "\n",
+
+
+print "\n\n\n"
+
+#################################################### Visaul lock acquire and release
+for t in range(time):
+  LockCommand = False
+  for i in range(MAX_THREAD):
+    if "Acq" in threads_timelines[i][t] or "Rel" in threads_timelines[i][t]: 
+      LockCommand = True
+      break
+ 
+  if LockCommand == False: continue 
+
+  print t,
+  for i in range(MAX_THREAD):
+    print threads_timelines[i][t], 
+    print '\t\t\t',
+  print "\n",
+
+
+

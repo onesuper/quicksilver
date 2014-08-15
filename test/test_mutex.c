@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+
+/* All threads use this lock to protect critical section */
 pthread_mutex_t g_lock;
 
 
@@ -19,10 +21,12 @@ void *worker(void *data) {
 
     pthread_mutex_lock(&g_lock);
 
-    do_something();
-
     printf("%lu is entering critial section %d\n", pthread_self(), i);
 
+    do_something();
+    sleep(1);
+
+    printf("%lu is leaving critial section %d\n", pthread_self(), i);
     pthread_mutex_unlock(&g_lock);
 
     do_something();
