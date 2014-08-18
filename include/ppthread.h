@@ -9,6 +9,7 @@
 // Pthread thread body
 typedef void *ThreadFunction(void *);
 
+void init_pthread_reference(void);
 
 /**
  * Defining global function pointers for calling real pthread functions
@@ -38,13 +39,10 @@ int (*ppthread_spin_destroy)(pthread_spinlock_t *);
 int (*ppthread_rwlock_init)(pthread_rwlock_t *, const pthread_rwlockattr_t *);
 int (*ppthread_rwlock_rdlock)(pthread_rwlock_t *);
 int (*ppthread_rwlock_wrlock)(pthread_rwlock_t *);
-int (*ppthread_rwlock_timedrdlock)(pthread_rwlock_t *, const struct timespec *);
-int (*ppthread_rwlock_timedwrlock)(pthread_rwlock_t *, const struct timespec *);
 int (*ppthread_rwlock_tryrdlock)(pthread_rwlock_t *);
 int (*ppthread_rwlock_trywrlock)(pthread_rwlock_t *);
 int (*ppthread_rwlock_unlock)(pthread_rwlock_t *);
 int (*ppthread_rwlock_destroy)(pthread_rwlock_t *);
-
 
 // pthread cond
 int (*ppthread_cond_init)(pthread_cond_t *, const pthread_condattr_t *);
@@ -64,7 +62,7 @@ int (*ppthread_barrier_destroy)(pthread_barrier_t *);
   assert(p##name != NULL);
 
 
-void init_pthread_reference() {
+void init_pthread_reference(void) {
 
   void *pthread_handle = dlopen("libpthread.so.0", RTLD_NOW);
   
@@ -94,8 +92,6 @@ void init_pthread_reference() {
   LOAD_SYM(pthread_rwlock_init, pthread_handle);
   LOAD_SYM(pthread_rwlock_rdlock, pthread_handle);
   LOAD_SYM(pthread_rwlock_wrlock, pthread_handle);
-  LOAD_SYM(pthread_rwlock_timedrdlock, pthread_handle);
-  LOAD_SYM(pthread_rwlock_timedwrlock, pthread_handle);
   LOAD_SYM(pthread_rwlock_tryrdlock, pthread_handle);
   LOAD_SYM(pthread_rwlock_trywrlock, pthread_handle);
   LOAD_SYM(pthread_rwlock_unlock, pthread_handle);  

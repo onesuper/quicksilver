@@ -12,6 +12,7 @@ all: dlink pthread slink
 # Ordinary pthread linkage
 pthread:
 	mkdir -p ./pthread
+	$(CC) $(CFLAGS) test_main.c         -o ./pthread/test_main         $(PTHREAD_LIBS)	
 	$(CC) $(CFLAGS) test_ownership.c    -o ./pthread/test_ownership    $(PTHREAD_LIBS)
 	$(CC) $(CFLAGS) test_rwlock.c       -o ./pthread/test_rwlock       $(PTHREAD_LIBS)
 	$(CC) $(CFLAGS) test_deadlock.c     -o ./pthread/test_deadlock     $(PTHREAD_LIBS)
@@ -25,6 +26,7 @@ pthread:
 # dynamically link to libqthread.so
 dlink:
 	mkdir -p ./dlink
+	$(CC) $(CFLAGS) test_main.c          -o ./dlink/test_main         $(QTHREAD_DYNAMIC)
 	$(CC) $(CFLAGS) test_ownership.c     -o ./dlink/test_ownership    $(QTHREAD_DYNAMIC)
 	$(CC) $(CFLAGS) test_rwlock.c        -o ./dlink/test_rwlock       $(QTHREAD_DYNAMIC)
 	$(CC) $(CFLAGS) test_deadlock.c      -o ./dlink/test_deadlock     $(QTHREAD_DYNAMIC)
@@ -37,7 +39,8 @@ dlink:
 # statically link to libqthread.a
 slink:
 	mkdir -p ./slink
-	$(CC) $(CFLAGS)  test_ownership.c    -o ./dlink/test_ownership    $(QTHREAD_STATIC)
+	$(CC) $(CFLAGS)  test_main.c         -o ./slink/test_main         $(QTHREAD_STATIC)	
+	$(CC) $(CFLAGS)  test_ownership.c    -o ./slink/test_ownership    $(QTHREAD_STATIC)
 	$(CC) $(CFLAGS)  test_rwlock.c       -o ./slink/test_rwlock       $(QTHREAD_STATIC)
 	$(CC) $(CFLAGS)  test_mutex.c        -o ./slink/test_mutex        $(QTHREAD_STATIC)
 	$(CC) $(CFLAGS)  test_spawn.c        -o ./slink/test_spawn        $(QTHREAD_STATIC)

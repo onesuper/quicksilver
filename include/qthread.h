@@ -25,17 +25,19 @@ class Qthread {
 
 private:
 
-  static Qthread _instance;
+  static Qthread instance;
+
 
   ///////////////////////////////////////////////////////////////////// ThreadEntry  
   class ThreadEntry {
   public:
     size_t tid;
-    volatile bool owning_lock; // if this thread is owning a lock
     ThreadEntry() {}
-    ThreadEntry(size_t _tid): tid(_tid), owning_lock(false) {}
+    ThreadEntry(size_t _tid): tid(_tid) {}
   };
 
+
+#if 0
   ///////////////////////////////////////////////////////////////////// Lockownership  
   class LockOwnership {
   public:
@@ -66,17 +68,20 @@ private:
       owned_lock = NULL;
       budget = 0;
     }
-
-
   };
 
   // TODO: Only one lock is tracked currently, try to track more locks in next version.
   // At any given time, only one lock can be owned by one thread in the system 
   // And during its ownership (is_used==true), other threads must not owned any locks
   LockOwnership _lock_ownership;
+#endif
+
 
   // Maintain all the active thread entries in a vector 
   std::vector<ThreadEntry> _active_entries;
+
+  // An increasing number used to assign unique thread id
+  volatile size_t _thread_count;
 
   // Pointing to the thread entry who holds the token
   // Could be negative (-1 = no one has token)
@@ -90,6 +95,7 @@ private:
 
   // Wall-clock (total elapsed time)
   Timer _stat_total;
+  
   // Time consumed in waiting token
   Timer _stat_serial;   
   
@@ -97,20 +103,22 @@ private:
 public:
   ///////////////////////////////////////////////////////////////////// Constructor  
   Qthread():
-  _lock_ownership(),
   _active_entries(),
-  _token_pos(-1),
-  _token_tid(INVALID_TID),
+  _thread_count(0), 
+  _token_pos(-1),   
+  _token_tid(INVALID_TID),    
   _stat_total(),
   _stat_serial() 
   {
 
     // Initializing the references to pthread subroutines
     DEBUG("Registering pthread instance\n");
-    init_pthread_reference();
 
     // set up the random number generator
     settable(12345,65435,34221,12345,9983651,95746118);
+
+    // Register the main process to the activelist, and set up its tid
+    my_tid = RegisterMe();
 
     ppthread_mutex_init(&_mutex, NULL);
     _stat_total.Start();
@@ -121,23 +129,23 @@ public:
     _stat_total.Pause();
     ppthread_mutex_destroy(&_mutex);
 
+    // Deregister me (main process) from the activelist
+    DeregisterMe();
+
     printf("Total Time: %ld\n", _stat_total.Total());
     printf("Serial Time: %ld @ %ld\n", _stat_serial.Total(), _stat_serial.Times()); 
   }
 
-  static Qthread& GetInstance(void) {
-    return _instance;
-  }
 
   ///////////////////////////////////////////////////////////////////// Registeration
-  void RegisterThread(size_t index) {
-    // FIXME: if we treat thread creation as a sync point, then this lock is unnecessary 
-    lock_();
-    DEBUG("Register: %lu", index);
+  size_t RegisterMe(void) {
 
+    size_t tid = getUniqueIndex();
+    DEBUG("# Register: %lu\n", tid);
     // Create a new entry according to tid
-    ThreadEntry entry(index);
+    ThreadEntry entry(tid);
 
+    lock_();
     // Link the newly created threadEntry into the active thread list
     _active_entries.push_back(entry);
 
@@ -146,6 +154,7 @@ public:
       _token_pos = 0;
       _token_tid = _active_entries[0].tid;
     }
+    unlock_();
 
 #if 0
     printf("Entries: ");
@@ -156,35 +165,41 @@ public:
     printf("Token: %lu @ [%d]\n", ((_token_pos >= 0 ) ? _token_tid : INVALID_TID), _token_pos);
 #endif
 
-    unlock_();
-    return;
+    return tid;
   }
 
 
   // We do not treat thread deregisteration as a sync point
   // So it must be protected by lock
-  void DeregisterThread(size_t tid) {
+  void DeregisterMe(void) {
+
+    size_t tid = my_tid;
 
     lock_();
-    DEBUG("Deregister: %lu", tid);
-
     // First of all, locate the target thread in the entires
     unsigned int pos;
     for (pos=0; pos<_active_entries.size(); pos++) {
-      if (_active_entries[pos].tid == tid) {
-        break;   
+      if (_active_entries[pos].tid ==tid) {
+        goto EntryFound;   
       }
     }
-   
+    // If we arrive here, then no entry is found
+    DEBUG("# DeRegFail: %lu\n", tid);
+    return;
+
+EntryFound:
+    DEBUG("# DeReg: %lu\n", tid);
     // Before we delete the thread entry, check whether he has owned any lock
     // This case happens when the lock's budget has not been costed but he stops
     // acquiring that lock. This is really bad, because others may also want to acquire that lock.
     // If so, force it to yield ownership before quiting.
     // TODO: Checking the 'dead' ownership when deregistering the thread is a
     // little bit late. Is there any possible to spot dead ownership as early as possible? 
+#if 0
     if (_lock_ownership.is_used == true && _active_entries[pos].owning_lock == true) {
       _lock_ownership.Yield();
     }
+#endif 
 
     // Delete the entry from the active list. 
     // The next entry gets the token for free (_token_pos doesn't move)
@@ -195,10 +210,11 @@ public:
     if (_active_entries.empty()) { 
       _token_pos = -1;
       _token_tid = INVALID_TID;
-      DEBUG("CallbackToken: %lu", tid);
+      DEBUG("# CallbackToken: %lu\n", tid);
       unlock_();
       return;
     }            
+
     // 2. If the pos to delete is above the token pos,
     // deleting it will affect the token ownership
     // Otherwise, deleting entires[pos] will not affect the token ownership 
@@ -235,15 +251,18 @@ public:
 
   int MutexLock(pthread_mutex_t * mutex) {
     int retval = -1;
-    DEBUG("MutexLock: %lu", my_tid);
+    DEBUG("# MutexLock: %lu\n", my_tid);
     _stat_serial.Start();
 
+#if 0
     // Acuqire lock as its onwer, so no bother to wait token to progress
     if (_lock_ownership.is_used == true && _lock_ownership.owner_thread == my_tid) {
       _lock_ownership.budget--; // cost budgets
       DEBUG("MutexLockAcqOwned(%p): %lu", mutex, my_tid);
       return ppthread_mutex_lock(mutex);
     } 
+#endif
+
 
     while (true) { // As long as retval==EBUSY, the loop will go on
       waitForToken();
@@ -252,11 +271,13 @@ public:
       if (retval == EBUSY) {
         // If thread fails to acquire the lock, then pass the token immediately
         // This prevent the case that thread sleep on the mutex while holding token
-        DEBUG("MutexLockBusy: %lu", my_tid);
+        DEBUG("# MutexLockBusy: %lu\n", my_tid);
         passToken();
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("MutexLockAcq(%p): %lu", mutex, my_tid); // acquire
+        DEBUG("# MutexLockAcq(%p): %lu\n", mutex, my_tid); // acquire
+
+#if 0
         // Claim ownership
         // We only take the ownership of a lock in the serial phase to ensure determinism
         if (_lock_ownership.is_used == false) {  
@@ -269,6 +290,7 @@ public:
           entry->owning_lock = true;
           unlock_();
         }
+#endif
         passToken();
         break;
       }
@@ -280,7 +302,7 @@ public:
 
   int MutexTrylock(pthread_mutex_t * mutex) {
     int retval = -1;
-    DEBUG("MutexTryLock: %lu", my_tid);
+    DEBUG("# MutexTryLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();          
@@ -290,12 +312,12 @@ public:
       // This is a trylock, so we do not desire for locks
       // If trylock failed, just return directly
       if (retval == EBUSY) {
-        DEBUG("MutexTryLockBusy: %lu)", my_tid);
+        DEBUG("# MutexTryLockBusy: %lu\n", my_tid);
         passToken();
         return EBUSY;  
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("MutexTryLockAcq: %lu", my_tid);
+        DEBUG("# MutexTryLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }
@@ -310,16 +332,16 @@ public:
   // and repeat to acuquire the lock and then check the token...
   int MutexWaitLock(pthread_mutex_t * mutex) {
     int retval = -1;
-    DEBUG("MutexWaitLock: %lu", my_tid);
+    DEBUG("# MutexWaitLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {          
       // Acqurie the lock anyway, let other competitors sleep
       retval = ppthread_mutex_lock(mutex);
-      DEBUG("MutexLockAcq: %lu", my_tid);
+      DEBUG("# MutexLockAcq: %lu\n", my_tid);
       // Check whether I have the token
       if (my_tid != _token_tid) {
         // if I have no token, yield the lock
-        DEBUG("MutexLockYield: %lu", my_tid);
+        DEBUG("# MutexLockYield: %lu\n", my_tid);
         ppthread_mutex_unlock(mutex); 
       } else {
         // Lock acquired here. Pass token and continues its execution
@@ -333,8 +355,10 @@ public:
 
   int MutexUnlock(pthread_mutex_t * mutex) {
     int retval = -1;
-    DEBUG("MutexUnlock: %lu", my_tid);
+    DEBUG("# MutexUnlock: %lu\n", my_tid);
 
+
+#if 0
     // Release lock as onwer, no need to wait token to progress
     if (_lock_ownership.is_used == true && _lock_ownership.owner_thread == my_tid) {
       DEBUG("MutexLockRelOwned(%p): %lu", mutex, my_tid);
@@ -350,10 +374,10 @@ public:
       }
       return ppthread_mutex_unlock(mutex);
     } 
-
+#endif
     waitForToken();
     retval = ppthread_mutex_unlock(mutex);
-    DEBUG("MutexLockRel(%p): %lu", mutex, my_tid);
+    DEBUG("# MutexLockRel(%p): %lu\n", mutex, my_tid);
     passToken();
     return retval;
   }
@@ -369,7 +393,7 @@ public:
 
   int SpinLock(pthread_spinlock_t * spinner) {
     int retval = -1;
-    DEBUG("SpinLock: %lu", my_tid);
+    DEBUG("# SpinLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
@@ -377,11 +401,11 @@ public:
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
         // If thread fails to acquire the lock, then pass the token immediately
-        DEBUG("SpinLockBusy: %lu", my_tid);
+        DEBUG("# SpinLockBusy: %lu\n", my_tid);
         passToken();
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("SpinLockAcq: %lu", my_tid);
+        DEBUG("# SpinLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }
@@ -392,19 +416,19 @@ public:
 
   int SpinTrylock(pthread_spinlock_t * spinner) {
     int retval = -1;
-    DEBUG("SpinTryLock: %lu", my_tid);
+    DEBUG("# SpinTryLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
       retval = ppthread_spin_trylock(spinner);
       // if trylock failed, we no longer check token, since we do not lock 
       if (retval == EBUSY) {
-        DEBUG("SpinTryLockBusy: %lu", my_tid);
+        DEBUG("# SpinTryLockBusy: %lu\n", my_tid);
         passToken();
         return EBUSY;
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("SpinTryLockAcq: %lu", my_tid);
+        DEBUG("# SpinTryLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }      
@@ -415,10 +439,10 @@ public:
 
   int SpinUnlock(pthread_spinlock_t * spinner) {
     int retval = -1;
-    DEBUG("SpinUnlock: %lu", my_tid);
+    DEBUG("# SpinUnlock: %lu\n", my_tid);
     waitForToken();
     retval = ppthread_spin_unlock(spinner);
-    DEBUG("SpinLockRel: %lu", my_tid);
+    DEBUG("# SpinLockRel: %lu\n", my_tid);
     passToken();
     return retval;
   }
@@ -434,7 +458,7 @@ public:
 
   int RdLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
-    DEBUG("RdLock: %lu", my_tid);
+    DEBUG("# RdLock: %lu \n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
@@ -442,11 +466,11 @@ public:
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
         // If thread fails to acquire the lock, then pass the token immediately
-        DEBUG("RdLockBusy: %lu", my_tid);
+        DEBUG("# RdLockBusy: %lu\n", my_tid);
         passToken();
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("RdLockAcq: %lu", my_tid);
+        DEBUG("# RdLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }
@@ -457,7 +481,7 @@ public:
 
   int WrLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
-    DEBUG("WrLock: %lu", my_tid);
+    DEBUG("# WrLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
@@ -465,11 +489,11 @@ public:
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
         // If thread fails to acquire the lock, then pass the token immediately
-        DEBUG("WrLockBusy: %lu", my_tid);
+        DEBUG("# WrLockBusy: %lu\n", my_tid);
         passToken();
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("WrLockAcq: %lu", my_tid);
+        DEBUG("# WrLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }
@@ -478,31 +502,21 @@ public:
     return retval;
   }
 
-  int TimedRdLock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
-    // Not supported
-    return 0;
-  }
-
-  int TimedWrLock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
-    // Not supported
-    return 0;
-  }  
-
   int TryRdLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
-    DEBUG("TryRdLock: %lu", my_tid);
+    DEBUG("# TryRdLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
       retval = ppthread_rwlock_tryrdlock(rwlock);
       // if trylock failed, we no longer check token, since we do not lock 
       if (retval == EBUSY) {
-        DEBUG("TryRdLockBusy: %lu", my_tid);
+        DEBUG("# TryRdLockBusy: %lu\n", my_tid);
         passToken();
         return EBUSY;
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("TryRdLockAcq: %lu", my_tid);
+        DEBUG("# TryRdLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }      
@@ -513,19 +527,19 @@ public:
 
   int TryWrLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
-    DEBUG("TryWrLock: %lu", my_tid);
+    DEBUG("# TryWrLock: %lu\n", my_tid);
     _stat_serial.Start();
     while (true) {
       waitForToken();
       retval = ppthread_rwlock_trywrlock(rwlock);
       // if trylock failed, we no longer check token, since we do not lock 
       if (retval == EBUSY) {
-        DEBUG("TryWrLockBusy: %lu", my_tid);
+        DEBUG("# TryWrLockBusy: %lu\n", my_tid);
         passToken();
         return EBUSY;
       } else {
         // If we arrive here, this thread must have acquired the lock
-        DEBUG("TryWrLockAcq: %lu", my_tid);
+        DEBUG("# TryWrLockAcq: %lu\n", my_tid);
         passToken();
         break;
       }      
@@ -536,10 +550,10 @@ public:
 
   int RwUnLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
-    DEBUG("RwUnlock: %lu", my_tid);
+    DEBUG("# RwUnlock: %lu\n", my_tid);
     waitForToken();
     retval = ppthread_rwlock_unlock(rwlock);
-    DEBUG("RwLockRel: %lu", my_tid);
+    DEBUG("# RwLockRel: %lu\n", my_tid);
     passToken();
     return retval;
   }
@@ -582,6 +596,11 @@ public:
   }
 
 
+  static inline Qthread& GetInstance(void) {
+    static Qthread instance;
+    return instance;
+  }
+
 private:
 
   // Query an entry in the list by its index
@@ -600,12 +619,12 @@ private:
 
   // Busy waiting until the caller get the token
   inline void waitForToken(void) {
-    DEBUG("WaitToken: %lu", my_tid);
+    DEBUG("# WaitToken: %lu\n", my_tid);
     while (my_tid != _token_tid) {
       // FIXME: I am not sure whether the following instruction is necessary
       __asm__ __volatile__ ("mfence");
     }
-    DEBUG("GetToken: %lu", my_tid);
+    DEBUG("# GetToken: %lu\n", my_tid);
   }
 
   // Force thread to pass his token to the next thread in the active list
@@ -620,29 +639,25 @@ private:
     }
 
     // FIXME: Using the randomized passToken() will make spinlock() non-deterministic
-
-    while (true) {
 #ifdef RANDOM_NEXT
       _token_pos = (_token_pos + 1 + KISS % _active_entries.size()) % _active_entries.size();
 #else
       _token_pos = (_token_pos + 1) % _active_entries.size();
 #endif
 
-      // Make sure the token is passing to a thread that does not own a lock
-      if (_active_entries[_token_pos].owning_lock == false) break;
-      
-    }
-    
-
     // Besides passToken, _token_pos is also modified when another thread is being deregisterred
     lock_();
-
     // Setup token id according to token position
     _token_tid = _active_entries[_token_pos].tid;
-    DEBUG("PassToken: %lu", my_tid);
-
+    DEBUG("# PassToken: %lu\n", my_tid);
     unlock_();
     return;
+  }
+
+
+  // Call gcc atomic operation to assign an increasing unique number
+  inline size_t getUniqueIndex(void) {
+    return __sync_fetch_and_add(&_thread_count, 1);
   }
 
   inline void lock_(void) {

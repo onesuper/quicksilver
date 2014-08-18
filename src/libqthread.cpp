@@ -3,21 +3,12 @@
 #include "debug.h"
 
 
-/**
- * Globals
- */
-
 // The parameter we need the thread to have. All threads being spawned share one copy
 ThreadParam thread_param;
 
 // Used to keep the safety of parameters passed to each spawned thread 
 pthread_mutex_t spawn_lock;
 
-// Define the only Qthread instance
-Qthread Qthread::_instance;
-
-// Count the assigned thread id
-static volatile size_t thread_count = 0;
 
 
 /**
@@ -39,7 +30,7 @@ void * ThreadFuncWrapper(void * param) {
   void* retval = my_func(my_arg);
 
   // Let each thread deregister it self
-  Qthread::GetInstance().DeregisterThread(my_tid);
+  Qthread::GetInstance().DeregisterMe();
 
   return retval;
 }
@@ -49,18 +40,27 @@ void * ThreadFuncWrapper(void * param) {
  * Shims to call replaced pthread subroutines
  */
 extern "C" {
+
+  // This API let thread quit the token passing game at any given time
+  // For example, if the main process doesn't acquire locks at all, it can call this API
+  // and let others go on to play this game
+  void qthread_quit_game(void) {
+    Qthread::GetInstance().DeregisterMe();
+    return;
+  }
+
+  // Actually each thread will automatically join game by default
+  // But we can call pairs of quit/join game, let a thread temporarily leave game
+  void qthread_join_game(void) {
+    Qthread::GetInstance().RegisterMe();
+    return;
+  }
+
   // pthread basic
   int pthread_create(pthread_t * tid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
     
-    size_t index;
-    
-    // Use gcc atomic operation to increment id
-    index = __sync_fetch_and_add(&thread_count, 1);    
-
-    DEBUG("Spawning thread %ld", index);
-
     // Register before spawning
-    Qthread::GetInstance().RegisterThread(index);
+    size_t index = Qthread::GetInstance().RegisterMe();
 
     // This lock is just for the safety of 'thread_param' (global variable).
     // TODO: this lock will make the initialization of threads be *serialized*.
@@ -87,7 +87,6 @@ extern "C" {
   }
 
   int pthread_cancel(pthread_t tid) {
-    DEBUG("call pthread_cancel");
     return ppthread_cancel(tid);
   }
 
@@ -96,8 +95,7 @@ extern "C" {
   }
 
   int pthread_exit(void * value_ptr) {
-    DEBUG("<%lu> call pthread_exit", my_tid);
-    Qthread::GetInstance().DeregisterThread(my_tid);
+    Qthread::GetInstance().DeregisterMe();
     return ppthread_exit(value_ptr);
   }
 
@@ -127,7 +125,6 @@ extern "C" {
     return Qthread::GetInstance().MutexDestroy(mutex);  
   }
 
-
   // pthread spinlock
   int pthread_spin_init(pthread_spinlock_t * spinner, int shared) {
     return Qthread::GetInstance().SpinInit(spinner, shared);
@@ -149,7 +146,6 @@ extern "C" {
     return Qthread::GetInstance().SpinDestroy(spinner);
   }
 
-
   // pthread rwlock
   int pthread_rwlock_init(pthread_rwlock_t * rwlock, const pthread_rwlockattr_t * attr) {
     return Qthread::GetInstance().RwLockInit(rwlock, attr);
@@ -161,14 +157,6 @@ extern "C" {
 
   int pthread_rwlock_wrlock(pthread_rwlock_t * rwlock) {
     return Qthread::GetInstance().WrLock(rwlock);
-  }
-
-  int pthread_rwlock_timedrdlock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
-    return Qthread::GetInstance().TimedRdLock(rwlock, timeout);
-  }
-
-  int pthread_rwlock_timedwrlock(pthread_rwlock_t * rwlock, const struct timespec * timeout) {
-    return Qthread::GetInstance().TimedWrLock(rwlock, timeout);
   }
 
   int pthread_rwlock_tryrdlock(pthread_rwlock_t * rwlock) {

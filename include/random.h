@@ -27,7 +27,7 @@ static UL z=362436069, w=521288629, jsr=123456789, jcong=380116160;
 static UL a=224466889, b=7584631, t[256];
 
 /* Use random seeds to reset z,w,jsr,jcong,a,b, and the table t[256]*/
-static UL x=0,y=0,bro; static unsigned char c=0;
+//static UL x=0,y=0,bro; static unsigned char c=0;
 
 /* Example procedure to set the table, using KISS: */
 void settable(UL i1,UL i2,UL i3,UL i4,UL i5, UL i6)

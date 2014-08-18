@@ -39,6 +39,8 @@ void *worker(void *data) {
 
 int main(int argc, char **argv) {
 
+  qthread_quit_game();
+
   pthread_mutex_init(&g_lock, NULL);
 
   const int nThreads = 4;
