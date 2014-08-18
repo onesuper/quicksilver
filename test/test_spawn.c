@@ -15,7 +15,7 @@ void *child(void *data) {
 
   do_something();
 
-  printf("in %lu\n", pthread_self());
+  printf("in child%lu\n", pthread_self());
 
   return NULL;
 }
@@ -23,6 +23,9 @@ void *child(void *data) {
 void *parent(void *data) {
 
   do_something();
+
+  printf("in parent%lu\n", pthread_self());
+
 
   const int nThreads = 2;
   pthread_t workers[nThreads];

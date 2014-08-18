@@ -7,23 +7,28 @@ It can read data from stdin or an existing file
 
 import sys
 
-MAX_THREAD = 4
+
 NO_OP = "-"
+
+
+
+
+# How many threads will be used?
+if len(sys.argv) == 2: 
+  MAX_THREAD = int(sys.argv[1])
+else:
+  MAX_THREAD = 4
+
+# This is the vertical thread timelines 
 threads_timelines = [[] for i in range(MAX_THREAD)]
 
 
-if len(sys.argv) < 2: # read data from stdin
-  lines = sys.stdin.readlines() 
-else:  # read data from file (given by argv[1])
-  file_obj = open(sys.argv[1])
-  try:
-    lines = file_obj.readlines()
-  finally:
-    file_obj.close()
-
+# Read-in log file from stardard input
+lines = sys.stdin.readlines() 
 
 time = 0
 
+# Parse the log file line by line, each line represents a single time slot
 for line in lines:
   if line.startswith("#"):
     # Strip out the '#' character and whitespaces

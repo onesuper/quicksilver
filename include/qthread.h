@@ -98,9 +98,9 @@ public:
   ///////////////////////////////////////////////////////////////////// Constructor  
   Qthread():
   _lock_ownership(),
+  _active_entries(),
   _token_pos(-1),
   _token_tid(INVALID_TID),
-  _active_entries(),
   _stat_total(),
   _stat_serial() 
   {
@@ -169,7 +169,7 @@ public:
     DEBUG("Deregister: %lu", tid);
 
     // First of all, locate the target thread in the entires
-    std::vector<ThreadEntry>::size_type pos;
+    unsigned int pos;
     for (pos=0; pos<_active_entries.size(); pos++) {
       if (_active_entries[pos].tid == tid) {
         break;   
@@ -202,7 +202,7 @@ public:
     // 2. If the pos to delete is above the token pos,
     // deleting it will affect the token ownership
     // Otherwise, deleting entires[pos] will not affect the token ownership 
-    if (pos < _token_pos) {
+    if (pos < (unsigned int) _token_pos) {
       _token_pos--;
     } 
     // 3. loop back to the first position
