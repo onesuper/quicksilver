@@ -62,9 +62,13 @@ int main(int argc, char **argv) {
 
     do_something();
   }
-  qthread_quit_game();
+
+  // this is for main's leave main
+  qthread_leave_game();
 
   pthread_join(worker, NULL);
+
+
 
   return 0;
 }

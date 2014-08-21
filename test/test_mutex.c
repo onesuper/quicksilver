@@ -39,7 +39,6 @@ void *worker(void *data) {
 
 int main(int argc, char **argv) {
 
-  qthread_quit_game();
 
   pthread_mutex_init(&g_lock, NULL);
 
@@ -50,8 +49,12 @@ int main(int argc, char **argv) {
   for (i = 0; i < nThreads; i++)
     pthread_create(&workers[i], NULL, worker, NULL);
 
+  qthread_leave_game();
+
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);
+
+//  pthread_join_game();
 
   return 0;
 }

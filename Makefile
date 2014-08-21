@@ -1,7 +1,7 @@
 
 
 CC = g++
-CFLAGS = -m64 -O3 -DDEBUG  -g
+CFLAGS = -m64 -DDEBUG  -g
 DYNAMIC_LIB = -shared -fPIC 
 
 all: libqthread.so libqthread.a

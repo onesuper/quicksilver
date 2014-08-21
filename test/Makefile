@@ -1,6 +1,6 @@
 
 LIB_DIR=../lib
-CFLAGS = -Wall -g -O3 
+CFLAGS = -Wall -g
 PTHREAD_LIBS = -lpthread  
 QTHREAD_DYNAMIC = $(abspath $(LIB_DIR)/libqthread.so) -rdynamic -lstdc++ -ldl -lpthread
 QTHREAD_STATIC = $(abspath $(LIB_DIR)/libqthread.a) -lstdc++ -ldl -lpthread 

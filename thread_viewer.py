@@ -73,7 +73,7 @@ print "\n\n\n"
 for t in range(time):
   LockCommand = False
   for i in range(MAX_THREAD):
-    if "Acq" in threads_timelines[i][t] or "Rel" in threads_timelines[i][t]: 
+    if "Acq" in threads_timelines[i][t] or "Rel" in threads_timelines[i][t]:
       LockCommand = True
       break
  
@@ -85,5 +85,21 @@ for t in range(time):
     print '\t\t\t',
   print "\n",
 
+'''
+#################################################### Visaul Token
+for t in range(time):
+  LockCommand = False
+  for i in range(MAX_THREAD):
+    if "Token" in threads_timelines[i][t] or "Reg" in threads_timelines[i][t]:
+      LockCommand = True
+      break
+ 
+  if LockCommand == False: continue 
 
+  print t,
+  for i in range(MAX_THREAD):
+    print threads_timelines[i][t], 
+    print '\t\t\t',
+  print "\n",
+'''
 
