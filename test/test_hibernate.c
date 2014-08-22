@@ -16,22 +16,7 @@ void do_something(void) {
 void *worker(void *data) {
 
   int i;
-  for (i = 0; i < 2; i++) {
-    do_something();
-
-    pthread_mutex_lock(&g_lock);
-
-    printf("%lu is entering critial section %d\n", pthread_self(), i);
-
-    do_something();
-    sleep(1);
-
-    printf("%lu is leaving critial section %d\n", pthread_self(), i);
-    pthread_mutex_unlock(&g_lock);
-
-    do_something();
-    //sleep(1);
-  }
+  do_something();
   
   return NULL;
 }
@@ -51,21 +36,14 @@ int main(int argc, char **argv) {
 
   qthread_hibernate_thread(0);
 
+  qthread_hibernate_thread(1);
+  qthread_wakeup_thread(1);
+
 
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);
 
 
-  qthread_wakeup_thread(0);
-
-  for (i = 0; i < nThreads; i++)
-    pthread_create(&workers[i], NULL, worker, NULL);
-
-
-  qthread_hibernate_thread(0);
-
-  for (i = 0; i < nThreads; i++)
-    pthread_join(workers[i], NULL);
 
 
 //  pthread_join_game();

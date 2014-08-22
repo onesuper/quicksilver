@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
   }
 
   // this is for main's leave main
-  qthread_leave_game();
+  //qthread_leave_game();
 
   pthread_join(worker, NULL);
 

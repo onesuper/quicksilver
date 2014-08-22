@@ -26,6 +26,7 @@ pthread:
 # dynamically link to libqthread.so
 dlink:
 	mkdir -p ./dlink
+	$(CC) $(CFLAGS) test_hibernate.c     -o ./dlink/test_hibernate    $(QTHREAD_DYNAMIC)	
 	$(CC) $(CFLAGS) test_main.c          -o ./dlink/test_main         $(QTHREAD_DYNAMIC)
 	$(CC) $(CFLAGS) test_ownership.c     -o ./dlink/test_ownership    $(QTHREAD_DYNAMIC)
 	$(CC) $(CFLAGS) test_rwlock.c        -o ./dlink/test_rwlock       $(QTHREAD_DYNAMIC)

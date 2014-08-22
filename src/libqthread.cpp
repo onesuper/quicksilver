@@ -16,22 +16,27 @@ Qthread Qthread::instance;
 extern "C" {
   /////////////////////////////////////////////////////////////////////////////// Qthread Defined
   // This API let thread temporarily leave the token passing game at any given time
-  // For example, if the main process doesn't acquire locks at all, it can call it
-  // and let others go on to play this game
-  int qthread_leave_game(void) {
+  // For example, if a thread doesn't acquire locks for a long time, it can call
+
+  int qthread_hibernate_thread(size_t tid) {
     if (qthread_initialized) {
-      return Qthread::GetInstance().DeregisterMe();
+      return Qthread::GetInstance().HibernateThread(tid);
     }
     return 0;
   }
 
-  // We can call this API to wake the thread up to play game
-  // It will return false if the thread is already in the game
-  int qthread_join_game(void) {
+  int qthread_wakeup_thread(size_t tid) {
     if (qthread_initialized) {
-      return Qthread::GetInstance().RegisterThread(my_tid);
+      return Qthread::GetInstance().WakeUpThread(tid);
     }
     return 0;
+  }
+
+  void qthread_sync(void) {
+    if (qthread_initialized) {
+      Qthread::GetInstance().Sync();
+    }
+    return;    
   }
 
 
@@ -65,8 +70,7 @@ extern "C" {
 
   int pthread_exit(void * value_ptr) {
     if (qthread_initialized) {
-      Qthread::GetInstance().DeregisterMe();
-      return ppthread_exit(value_ptr);
+      return Qthread::GetInstance().Exit(value_ptr);
     }
     return 0;
   }
@@ -261,34 +265,6 @@ extern "C" {
 
 }
 
-
-/**
- * Fake entry point of thread. We use it to unregister thread inside the thread body
- */
-void * fake_thread_entry(void * param) {
-
-  ThreadParam * obj = static_cast<ThreadParam *>(param);
-  
-  // Dump parameters
-  ThreadFunction my_func = obj->func;
-  void * my_arg = (void *) obj->arg;
-  my_tid = obj->index;
-
-  // Unlock after copying out paramemters
-  ppthread_mutex_unlock(&spawn_lock);
-
-
-  //// Register when the thread is spawned
-  //Qthread::GetInstance().RegisterMe();
-
-  // Call the real thread function
-  void * retval = my_func(my_arg);
-
-  // Let each thread deregister it self
-  Qthread::GetInstance().DeregisterMe();
-
-  return retval;
-}
 
 
 
