@@ -12,6 +12,16 @@
 
 #define MAIN_TID 0
 
+// We use this to track thread's status. If a thread is waken up by 
+// any sync operation (e.g. cond signal/mutex release), we move its entry from sleep list
+// to active list, or vice versa.
+enum ThreadStatus {
+  STATUS_READY,
+  STATUS_LOCK_WAITING, // Different reasons for sleeping
+  STATUS_COND_WAITING,
+  STATUS_BARR_WAITING,
+  STATUS_HIBERNATE,
+};
 
 // Pack all the parameters in a struct
 class ThreadParam {
@@ -55,12 +65,29 @@ private:
   ///////////////////////////////////////////////////////////////////// ThreadEntry  
   class ThreadEntry {
   public:
-    size_t tid;
-    pthread_t pid;
+    volatile size_t tid;     // The thread we assigned
+    volatile pthread_t pid;  // Assigned by pthread_self
+    volatile int status;
+    volatile void * cond;    // each thread may wait for one cond each time   
+    volatile bool broadcast; // If broadcast = true, the thread will be woken up by broadcast
 
-    ThreadEntry() {}
-    ThreadEntry(size_t _tid): tid(_tid) {}
-    ThreadEntry(size_t _tid, pthread_t _pid): tid(_tid), pid(_pid) {}
+    inline ThreadEntry() {}
+
+    inline ThreadEntry(size_t tid, pthread_t pid) {
+      this->tid = tid;
+      this->pid = pid;
+      this->status = STATUS_READY;
+      this->broadcast = false;
+      this->cond = NULL;
+    } 
+
+    inline ThreadEntry(const ThreadEntry & entry) {
+      this->tid = entry.tid;
+      this->pid = entry.pid;
+      this->status = entry.status;
+      this->cond = entry.cond;
+      this->broadcast = entry.broadcast;
+    }
   };
 
 
@@ -105,7 +132,7 @@ private:
 
 
   // Maintain all the active thread entries in a vector
-  // All threads in this list is playing token passing game
+  // All threads in this list is participating the token passing game
   std::vector<ThreadEntry> _active_entries;
 
   // We will hold the hibernated threads in another vector
@@ -162,7 +189,7 @@ public:
 
     // Register Main thread
     my_tid = MAIN_TID;
-    RegisterThread(MAIN_TID);
+    registerThread(MAIN_TID, 0);
     DEBUG("Reg: %d\n", MAIN_TID);
 
     // set up the random number generator
@@ -186,134 +213,67 @@ public:
   }
 
 
-  ///////////////////////////////////////////////////////////////////// Registeration
-  // For any threads we want determinsitic execution, we can this function to register it
-  // NOTE: Thread to call the following registeration function must pocess token token
-  int RegisterThread(size_t tid) {
 
-    // Check duplication in active_entries
-    for (unsigned int i = 0; i < _active_entries.size(); i++) {
-      if (_active_entries[i].tid == tid) {
-        DEBUG("RegDup: %lu\n", tid);
-        return 1;
-      }
-    }
-
-    DEBUG("# Regster(%lu): %lu\n", tid, my_tid);
-    ThreadEntry entry(tid);
-    _active_entries.push_back(entry);
-
-    // Start from a empty list
-    if (_token_pos == -1) {
-      _token_pos = 0;
-      _token_tid = _active_entries[0].tid;
-    }
-    return 0;
-  }
-
-
-  int DeregisterThread(size_t tid) {
-
-    // Locate the target thread in the entires
-    for (unsigned int i = 0; i < _active_entries.size(); i++) {
-      if (_active_entries[i].tid == tid) {
-        DEBUG("# DeReg: %lu\n", tid);
-        _active_entries.erase(_active_entries.begin() + i);
-        _token_pos--; // Roll back the pos
-        return 0;
-      }
-    }
-
-    // if  no entry is found
-    DEBUG("# DeReg404: %lu\n", tid);
-    return 1;
-  }
-
-
-  // Move a specific thread from _active_entries to _sleep_entrires
-  int DeactivateThread(size_t tid) {
-
-    // Locate the target thread in the entires
-    for (unsigned int i = 0; i < _active_entries.size(); i++) {
-      if (_active_entries[i].tid == tid) {
-        DEBUG("# DeAct: %lu\n", tid);
-        ThreadEntry entry(tid);
-        _active_entries.erase(_active_entries.begin() + i);
-        _token_pos--;  // Roll back the pos
-        _sleep_entries.push_back(entry);
-        return 0;
-      }
-    }
-    
-    // if  no entry is found
-    DEBUG("# DeAct404: %lu\n", tid);
-    return 1;
-  }
-
-  int ActivateThread(size_t tid) {
-    // Locate the target thread in the entires
-    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
-      if (_sleep_entries[i].tid == tid) {
-        DEBUG("# Act: %lu\n", tid);
-        ThreadEntry entry(tid);
-        _sleep_entries.erase(_active_entries.begin() + i);
-        _active_entries.push_back(entry);
-
-        // Start from a empty list
-        if (_token_pos == -1) {
-          _token_pos = 0;
-          _token_tid = _active_entries[0].tid;
-        }
-        return 0;
-      }
-    }
-    
-    // if  no entry is found
-    DEBUG("# DeAct404: %lu\n", tid);
-    return 1;
-  }
-
-  // Called before we terminate a thread
-  void Terminate(void) {
-    waitForToken();
-    DeregisterThread(my_tid);
-    passToken();
-    return;
-  }
-
+  //////////////////////////////////////////////////////////////////////////// Pthread Basics
   // Do nothing but make token can be passed through
-  void Sync(void) {
+  void DummySync(void) {
     waitForToken();
-    DEBUG("# Sync: %lu\n", my_tid);
+    DEBUG("# DumSync: %lu\n", my_tid);
     passToken();
     return;
   }
 
-
+  //The followin API is for activat/deactivate thread externally
   int HibernateThread(size_t tid) {
     waitForToken();
-    DEBUG("# Hibernate(%lu) :%lu\n", tid, my_tid);
-    int retval = ActivateThread(tid);
+    DEBUG("# Hibernate(%lu): %lu\n", tid, my_tid);
+    int retval = deactivateThread(tid, STATUS_HIBERNATE);
     passToken();
     return retval;
   }
 
   int WakeUpThread(size_t tid) {
     waitForToken();
-    DEBUG("# WakeUp(%lu) :%lu\n", tid, my_tid);
-    int retval = DeregisterThread(tid);
+    DEBUG("# WakeUp(%lu): %lu\n", tid, my_tid);
+    int retval = activateThread(tid);
     passToken();
     return retval;
   }
 
+  // A wrapper for calling through pthread id
+  int HibernateThreadByPid(pthread_t pid) {
+    waitForToken();
+    ThreadEntry * entry = getActiveEntryByPid(pid);
+    if (entry == NULL) {
+      DEBUG("# Hibernate404: %lu\n", my_tid);
+      return 1;
+    }
+    size_t tid = entry->tid;
+    DEBUG("# Hibernate(%lu): %lu\n", tid, my_tid);
+    int retval = deactivateThread(tid, STATUS_HIBERNATE);
+    passToken();
+    return retval;
+  }
  
+  int WakeUpThreadByPid(pthread_t pid) {
+    waitForToken();
+    ThreadEntry * entry = getActiveEntryByPid(pid);
+    if (entry == NULL) { 
+      DEBUG("# WakeUp404: %lu\n", my_tid);
+      return 1;
+    }
+    size_t tid = entry->tid;
+    DEBUG("# WakeUp(%lu): %lu\n", tid, my_tid);
+    int retval = activateThread(tid);
+    passToken();
+    return retval;
+  }
 
-  //////////////////////////////////////////////////////////////////////////// Pthread Basics
-  // Create is treated as a sync point as well
-  int Create(pthread_t * pid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
+
+  // Spawing is treated as a sync point as well
+  int Spawn(pthread_t * pid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
     
     waitForToken();
-
     // This lock is just for the safety of 'thread_param' (global variable).
     // TODO: this lock will make the initialization of threads be *serialized*.
     // When we have a lot of threads to spawn, that may hurt performance.
@@ -335,12 +295,26 @@ public:
     waitForToken();
     passToken();
 
-
-    // Register after we have created the thread
+    // We treat as another sync point
+    // Register after we have created the thread. We also record the pthread_id
     waitForToken();
-    RegisterThread(tid);
+    registerThread(tid, *pid);
     passToken();
 
+    return retval;
+  }
+
+  // Call before a thread quit
+  void Terminate(void) {
+    waitForToken();
+    deregisterThread(my_tid);
+    passToken();
+    return;
+  }
+
+  // pthread_join
+  int Join(pthread_t tid, void ** val) {
+    int retval = ppthread_join(tid, val);
     return retval;
   }
 
@@ -356,6 +330,61 @@ public:
   int MutexInit(pthread_mutex_t * mutex, const pthread_mutexattr_t * attr) {
     return ppthread_mutex_init(mutex, attr);
   }
+
+#if 0
+  // The order enqueue in the sleep_list is determined
+  int LockAcquire(pthread_mutex_t * lock) {
+    int retval = -1;
+    _stat_serial.Start();
+    DEBUG("# AcquireLock: %lu\n", my_tid);
+    while (true) { // As long as retval==EBUSY, the loop will go on
+      waitForToken();
+      retval = ppthread_mutex_trylock(lock);
+      if (retval == EBUSY) {
+        // If thread fails to acquire the lock, then pass the token immediately
+        // This prevent the case that thread sleep on the mutex while holding token
+        DEBUG("# LockBusy: %lu\n", my_tid);
+        // If I fail to acquire that lock, just deactivate myself and sleep on that lock
+        deactivateThread(my_tid, STATUS_LOCK_WAITING);
+        passToken();
+        // This is asserted to fail. Thread should be sleeping. When it wakes up, it will
+        // acquire the lock and enter critical section. So we hope the threads will wake up deterministally
+        retval = ppthread_mutex_lock(lock);
+
+        waitForToken();
+
+        break;
+      } else {
+        // If we arrive here, this thread must have acquired the lock
+        DEBUG("# LockAcq(%p): %lu\n", lock, my_tid); 
+        passToken();
+        break;
+      }
+    }
+
+    _stat_serial.Pause();        
+    return retval;
+  }
+
+
+  int LockRelease(pthread_mutex_t * lock) {
+    int retval = -1;
+    DEBUG("# ReleaseLock: %lu\n", my_tid);
+
+    waitForToken();
+    retval = ppthread_mutex_unlock(lock);
+    DEBUG("# LockReleased(%p): %lu\n", lock, my_tid);
+    passToken();
+
+    waitForToken();
+    activateThread(my_tid);
+    passToken();
+
+    return retval;
+  }
+
+
+#endif
 
   int MutexLock(pthread_mutex_t * mutex) {
     int retval = -1;
@@ -382,7 +411,6 @@ public:
     return retval;
   }
 
-
   int MutexTrylock(pthread_mutex_t * mutex) {
     int retval = -1;
     DEBUG("# MutexTryLock: %lu\n", my_tid);
@@ -404,7 +432,8 @@ public:
         passToken();
         break;
       }
-    }    
+    }
+
     _stat_serial.Pause();        
     return retval;
   }
@@ -417,9 +446,9 @@ public:
     int retval = -1;
     DEBUG("# MutexWaitLock: %lu\n", my_tid);
     _stat_serial.Start();
-    while (true) {          
-      // Acqurie the lock anyway, let other competitors sleep
+    while (true) {
       retval = ppthread_mutex_lock(mutex);
+      // Any thread may get the lock
       DEBUG("# MutexLockAcq: %lu\n", my_tid);
       // Check whether I have the token
       if (my_tid != _token_tid) {
@@ -428,7 +457,7 @@ public:
         ppthread_mutex_unlock(mutex); 
       } else {
         // Lock acquired here. Pass token and continues its execution
-        passToken();
+        passToken(); 
         break;
       }
     }
@@ -445,6 +474,7 @@ public:
     passToken();
     return retval;
   }
+
 
   int MutexDestroy(pthread_mutex_t * mutex) {
     return ppthread_mutex_destroy(mutex);
@@ -628,25 +658,135 @@ public:
 
   ///////////////////////////////////////////////////////////////////////////////// Cond
   int CondInit(pthread_cond_t * cond, const pthread_condattr_t * attr) {
-    return 0;
+    return ppthread_cond_init(cond, attr);
   }
 
-  int CondWait(pthread_cond_t * cond, pthread_mutex_t * mutex) {
-    return 0;
+  int CondWait(pthread_cond_t * cond, pthread_mutex_t * cond_mutex) {
+    int retval = -1;
+    _stat_serial.Start();
+
+    // Before we sleep, we move the entry to sleep list, so that my sleep
+    // will not affect the token passing game
+    // The order entering the sleep entry is ensured by token
+    waitForToken();
+    bool isFound = false;
+    // Deactive myself
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      if (_active_entries[i].tid == my_tid) {
+        isFound = true;
+        DEBUG("# CondDeAct: %lu\n", my_tid);
+        ThreadEntry entry = _active_entries[i]; // Deep copy
+        entry.status = STATUS_COND_WAITING;     // Cond wait
+        entry.cond = (void *) cond;
+        _sleep_entries.push_back(entry);
+        _active_entries.erase(_active_entries.begin() + i);
+        if (_active_entries.empty())
+          _token_pos = -1;
+        else 
+          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+        break;
+      }
+    }
+    assert(isFound == true);
+    passToken();
+
+
+    // Block until I become active. (leave token passing)
+    // The order threads leave this loop is determinisitic
+    // FIXME: it requires scanning each time
+    while (true) {
+      // Suspend on the real cond. Reevaluate after being woken up
+      retval = ppthread_cond_wait(cond, cond_mutex);
+
+      // I am woken up by the signal doesn't mean I should progress
+      // If a thread is active, we can find it in the active entry
+      ThreadEntry * entry = getActiveEntry(my_tid);
+      if (entry == NULL) {  // Inactived
+        ppthread_cond_signal(cond);
+      } else { // Active
+        break;
+      }
+    }
+    
+    waitForToken();
+    DEBUG("# CondWakeup(%p): %lu\n", cond, my_tid);
+    _stat_serial.Pause();        
+    return retval;
   }
+
 
   int CondSignal(pthread_cond_t * cond) {
-    return 0;
+    int retval = -1;
+    _stat_serial.Start();    
+
+    waitForToken();
+
+    // Look for the first cond client in the sleep entry
+    // And move it back to the active entry
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      ThreadEntry entry = _sleep_entries[i];
+      if (entry.cond == (void *) cond) {
+        DEBUG("# CondSignal(%lu): %lu\n", entry.tid, my_tid);
+        entry.status = STATUS_READY;   // set ready
+        entry.cond = NULL;
+        entry.broadcast = false;
+        _active_entries.push_back(entry);  
+        _sleep_entries.erase(_sleep_entries.begin() + i);
+        break;   
+      }
+    }
+
+    retval = ppthread_cond_signal(cond);
+
+    // Directly pass to the thread that should be woken up
+    _token_tid = _active_entries.back().tid;
+    _token_pos = _active_entries.size() - 1;
+
+    _stat_serial.Pause();        
+    return retval;
   }
 
   int CondBroadcast(pthread_cond_t * cond) {
-    return 0;
+    int retval = -1;
+    _stat_serial.Start();    
+
+
+    waitForToken();
+
+    // Wake up all the corresponding threads
+    // In the first pass, we just copy
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      ThreadEntry entry = _sleep_entries[i];
+      if (entry.cond == (void *) cond) {
+        DEBUG("# CondBroadAct(%lu): %lu\n", entry.tid, my_tid);
+        entry.status = STATUS_READY;   // set ready
+        entry.cond = NULL;
+        entry.broadcast = true;
+        _active_entries.push_back(entry);  
+      }
+    }
+
+    // Delete the entires int the second pass
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      ThreadEntry entry = _sleep_entries[i];
+      if (entry.cond == (void *) cond) {
+        _sleep_entries.erase(_sleep_entries.begin() + i);
+      }
+    }
+
+    retval = ppthread_cond_broadcast(cond);
+
+    passToken();
+
+    _stat_serial.Pause();        
+    return retval;
   }
 
   int CondDestroy(pthread_cond_t * cond) {
-    return 0;
+    return ppthread_cond_destroy(cond);
   }
 
+  ///////////////////////////////////////////////////////////////////////////////// Barrier
   int BarrierInit(pthread_barrier_t * barrier, const pthread_barrierattr_t * attr, unsigned int count) {
     return 0;
   }
@@ -661,7 +801,122 @@ public:
 
 
 
+  // For testing
+  int Blah(void) {
+
+    DEBUG("\n* Token * ");
+    DEBUG("%lu [%d]", _token_tid, _token_pos);
+
+    DEBUG("\n* Active * ");
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      DEBUG("%lu\t", _active_entries[i].tid);
+    }
+
+    DEBUG("\n* Sleep *");
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      DEBUG("%lu\t", _sleep_entries[i].tid);
+    }
+    DEBUG("\n* * * \n");
+
+  }
+
+
 private:
+
+
+
+ ///////////////////////////////////////////////////////////////////// Registeration
+  // For any threads we want determinsitic execution, we can this function to register it
+  // NOTE: Thread to call the following registeration function must pocess token token
+  int registerThread(size_t tid, pthread_t pid) {
+
+    // Check duplication in active_entries
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      if (_active_entries[i].tid == tid) {
+        DEBUG("RegDup: %lu\n", tid);
+        return 1;
+      }
+    }
+    DEBUG("# Regster(%lu): %lu\n", tid, my_tid);
+    ThreadEntry entry(tid, pid);
+    entry.status = STATUS_READY;
+    _active_entries.push_back(entry);
+
+    // Start from a empty list
+    if (_token_pos == -1) {
+      _token_pos = 0;
+      _token_tid = _active_entries[0].tid;
+    }
+    return 0;
+  }
+
+
+  int deregisterThread(size_t tid) {
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      if (_active_entries[i].tid == tid) {
+        DEBUG("# DeReg: %lu\n", tid);
+        _active_entries.erase(_active_entries.begin() + i);
+        if (_active_entries.empty())
+          _token_pos = -1;
+        else 
+          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+        return 0;
+      }
+    }
+    // if  no entry is found
+    DEBUG("# DeReg404: %lu\n", tid);
+    return 1;
+  }
+
+
+  // Move a specific thread from _active_entries to _sleep_entrires
+  // Any sleeping threads must be assigned a status
+  int deactivateThread(size_t tid, int status) {
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      if (_active_entries[i].tid == tid) {
+        DEBUG("# DeAct: %lu\n", tid);
+        ThreadEntry entry = _active_entries[i]; // Deep copy
+        entry.status = status;
+        _sleep_entries.push_back(entry);
+        _active_entries.erase(_active_entries.begin() + i);
+        if (_active_entries.empty())
+          _token_pos = -1;
+        else 
+          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+        return 0;
+      }
+    }
+    // if  no entry is found
+    DEBUG("# DeAct404: %lu\n", tid);
+    return 1;
+  }
+
+
+  int activateThread(size_t tid) {
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      if (_sleep_entries[i].tid == tid) {
+        DEBUG("# Act: %lu\n", tid);
+        ThreadEntry entry = _sleep_entries[i]; // Deep copy
+        entry.status = STATUS_READY;
+        _active_entries.push_back(entry);
+        _sleep_entries.erase(_sleep_entries.begin() + i);
+        // Start from a empty list
+        if (_token_pos == -1) {
+          _token_pos = 0;
+          _token_tid = _active_entries[0].tid;
+        }
+        return 0;
+      }
+    }
+    // if  no entry is found
+    DEBUG("# DeAct404: %lu\n", tid);
+    return 1;
+  }
+
+
 
   // Call gcc atomic operation to assign an increasing unique number
   inline size_t getUniqueIndex(void) {
@@ -670,7 +925,7 @@ private:
 
   // Query an entry in the list by its index
   // Return NULL if not entry is found
-  ThreadEntry * getThreadEntry(size_t tid) {
+  inline ThreadEntry * getActiveEntry(size_t tid) {
     ThreadEntry * entry = NULL;
     // Locate the target thread in the entires
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
@@ -682,11 +937,57 @@ private:
     return entry;
   }
 
+  // Query an entry in the list by its index
+  // Return NULL if not entry is found
+  inline ThreadEntry * getSleepEntry(size_t tid) {
+    ThreadEntry * entry = NULL;
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      if (_sleep_entries[i].tid == tid) {
+        entry = &_sleep_entries[i];
+        break;   
+      }
+    }
+    return entry;    
+  }
+
+  // Query an entry in the list by its index
+  // Return NULL if not entry is found
+  inline ThreadEntry * getActiveEntryByPid(pthread_t pid) {
+    ThreadEntry * entry = NULL;
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      if (_active_entries[i].pid == pid) {
+        entry = &_active_entries[i];
+        break;   
+      }
+    }
+    return entry;
+  }
+
+  // Query an entry in the list by its index
+  // Return NULL if not entry is found
+  inline ThreadEntry * getSleepEntryByPid(pthread_t pid) {
+    ThreadEntry * entry = NULL;
+    // Locate the target thread in the entires
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      if (_sleep_entries[i].pid == pid) {
+        entry = &_sleep_entries[i];
+        break;   
+      }
+    }
+    return entry;
+  }
+
+
   // Busy waiting until the caller get the token
   inline void waitForToken(void) const {
+
+    if (_active_entries.empty()) return;
+    //assert(!_active_entries.empty());
+
     DEBUG("# WaitToken: %lu\n", my_tid);
     while (my_tid != _token_tid) {
-      // FIXME: I am not sure whether the following instruction is necessary
       __asm__ __volatile__ ("mfence");
     }
     DEBUG("# GetToken: %lu\n", my_tid);
