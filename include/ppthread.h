@@ -7,8 +7,7 @@
 #include <assert.h>
 
 
-
-// Pthread thread body
+// Pthread thread functionbody
 typedef void * (*ThreadFunction) (void *);
 
 
@@ -72,39 +71,38 @@ void init_pthread_reference(void) {
 
   LOAD_SYM(pthread_create, pthread_handle);
   LOAD_SYM(pthread_cancel, pthread_handle);
-  LOAD_SYM(pthread_exit, pthread_handle);
-  LOAD_SYM(pthread_join, pthread_handle);
+  LOAD_SYM(pthread_exit,   pthread_handle);
+  LOAD_SYM(pthread_join,   pthread_handle);
 
-  LOAD_SYM(pthread_mutex_init, pthread_handle);
-  LOAD_SYM(pthread_mutex_lock, pthread_handle);
+  LOAD_SYM(pthread_mutex_init,   pthread_handle);
+  LOAD_SYM(pthread_mutex_lock,   pthread_handle);
   LOAD_SYM(pthread_mutex_unlock, pthread_handle);
   LOAD_SYM(pthread_mutex_trylock, pthread_handle);
   LOAD_SYM(pthread_mutex_destroy, pthread_handle);
 
-  LOAD_SYM(pthread_spin_init, pthread_handle);
-  LOAD_SYM(pthread_spin_lock, pthread_handle);
-  LOAD_SYM(pthread_spin_unlock, pthread_handle);
+  LOAD_SYM(pthread_spin_init,    pthread_handle);
+  LOAD_SYM(pthread_spin_lock,    pthread_handle);
+  LOAD_SYM(pthread_spin_unlock,  pthread_handle);
   LOAD_SYM(pthread_spin_trylock, pthread_handle);
   LOAD_SYM(pthread_spin_destroy, pthread_handle);
 
-  LOAD_SYM(pthread_rwlock_init, pthread_handle);
-  LOAD_SYM(pthread_rwlock_rdlock, pthread_handle);
-  LOAD_SYM(pthread_rwlock_wrlock, pthread_handle);
+  LOAD_SYM(pthread_rwlock_init,      pthread_handle);
+  LOAD_SYM(pthread_rwlock_rdlock,    pthread_handle);
+  LOAD_SYM(pthread_rwlock_wrlock,    pthread_handle);
   LOAD_SYM(pthread_rwlock_tryrdlock, pthread_handle);
   LOAD_SYM(pthread_rwlock_trywrlock, pthread_handle);
-  LOAD_SYM(pthread_rwlock_unlock, pthread_handle);  
-  LOAD_SYM(pthread_rwlock_destroy, pthread_handle);
+  LOAD_SYM(pthread_rwlock_unlock,    pthread_handle);  
+  LOAD_SYM(pthread_rwlock_destroy,   pthread_handle);
 
-  LOAD_SYM(pthread_cond_init, pthread_handle);
-  LOAD_SYM(pthread_cond_wait, pthread_handle);
-  LOAD_SYM(pthread_cond_signal, pthread_handle);
+  LOAD_SYM(pthread_cond_init,      pthread_handle);
+  LOAD_SYM(pthread_cond_wait,      pthread_handle);
+  LOAD_SYM(pthread_cond_signal,    pthread_handle);
   LOAD_SYM(pthread_cond_broadcast, pthread_handle);
-  LOAD_SYM(pthread_cond_destroy, pthread_handle);
+  LOAD_SYM(pthread_cond_destroy,   pthread_handle);
 
-  LOAD_SYM(pthread_barrier_init, pthread_handle);
-  LOAD_SYM(pthread_barrier_wait, pthread_handle);
+  LOAD_SYM(pthread_barrier_init,    pthread_handle);
+  LOAD_SYM(pthread_barrier_wait,    pthread_handle);
   LOAD_SYM(pthread_barrier_destroy, pthread_handle);
-
 
 
   // close after binding
