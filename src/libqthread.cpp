@@ -3,10 +3,8 @@
 
 
 
-
 // The instance of Qthread is constructed before main
 Qthread Qthread::instance;
-
 
 
 
@@ -17,6 +15,14 @@ extern "C" {
   /////////////////////////////////////////////////////////////////////////////// Qthread Defined
   // This API let thread temporarily leave the token passing game at any given time
   // For example, if a thread doesn't acquire locks for a long time, it can call
+
+
+  void qthread_blah(void) {
+    if (qthread_initialized) {
+      Qthread::GetInstance().Blah();
+    }
+    return;
+  }
 
   int qthread_hibernate_thread(size_t tid) {
     if (qthread_initialized) {
@@ -32,9 +38,23 @@ extern "C" {
     return 0;
   }
 
-  void qthread_sync(void) {
+  int qthread_hibernate_thread_by_pid(pthread_t pid) {
     if (qthread_initialized) {
-      Qthread::GetInstance().Sync();
+      return Qthread::GetInstance().HibernateThread(pid);
+    }
+    return 0;
+  }
+
+  int qthread_wakeup_thread_by_pid(size_t pid) {
+    if (qthread_initialized) {
+      return Qthread::GetInstance().WakeUpThread(pid);
+    }
+    return 0;
+  }
+
+  void qthread_dummy_sync(void) {
+    if (qthread_initialized) {
+      Qthread::GetInstance().DummySync();
     }
     return;    
   }
@@ -46,10 +66,11 @@ extern "C" {
   }
 
   /////////////////////////////////////////////////////////////////////////////// Pthread Defined
-  // pthread basic
+  /////////////////////////////////////////////////////////////////////////////// Pthread basic
+  
   int pthread_create(pthread_t * tid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
     if (qthread_initialized) {
-      return Qthread::GetInstance().Create(tid, attr, func, arg);
+      return Qthread::GetInstance().Spawn(tid, attr, func, arg);
     }
     return 0;
   }
@@ -63,7 +84,7 @@ extern "C" {
 
   int pthread_join(pthread_t tid, void ** val) {
     if (qthread_initialized) {
-      return ppthread_join(tid, val);
+      return Qthread::GetInstance().Join(tid, val);
     }
     return 0;
   }
@@ -75,7 +96,8 @@ extern "C" {
     return 0;
   }
 
-  // pthread mutex
+  /////////////////////////////////////////////////////////////////////////////// Pthread Mutex
+
   int pthread_mutex_init(pthread_mutex_t * mutex, const pthread_mutexattr_t  *attr) {
     if (qthread_initialized) {
       return Qthread::GetInstance().MutexInit(mutex, attr);
@@ -83,24 +105,29 @@ extern "C" {
     return 0;
   }
 
+
+  // Provide a novel api to support "wait" version mutex lock
+  // int pthread_mutex_waitlock(pthread_mutex_t * mutex) {
+  //   if (qthread_initialized) {
+  //     return Qthread::GetInstance().MutexWaitLock(mutex);
+  //   }
+  //   return 0;
+  // }  
+
   int pthread_mutex_lock(pthread_mutex_t * mutex) {
     if (qthread_initialized) {
-      return Qthread::GetInstance().MutexLock(mutex);
+      return Qthread::GetInstance().LockAcquire(mutex);
+      // return Qthread::GetInstance().MutexLock(mutex);
+
     }
     return 0;
   }
   
-  // Provide a novel api to support "wait" version mutex lock
-  int pthread_mutex_waitlock(pthread_mutex_t * mutex) {
-    if (qthread_initialized) {
-      return Qthread::GetInstance().MutexWaitLock(mutex);
-    }
-    return 0;
-  }  
-
   int pthread_mutex_unlock(pthread_mutex_t * mutex) {
     if (qthread_initialized) {
-      return Qthread::GetInstance().MutexUnlock(mutex);
+      return Qthread::GetInstance().LockRelease(mutex);
+      // return Qthread::GetInstance().MutexUnlock(mutex);
+
     }
     return 0;
   }
@@ -155,7 +182,8 @@ extern "C" {
     return 0;
   }
 
-  // pthread rwlock
+  /////////////////////////////////////////////////////////////////////////////// Pthread Read/Write Lock
+
   int pthread_rwlock_init(pthread_rwlock_t * rwlock, const pthread_rwlockattr_t * attr) {
     if (qthread_initialized) {
       return Qthread::GetInstance().RwLockInit(rwlock, attr);
@@ -205,7 +233,8 @@ extern "C" {
     return 0;
   }
 
-  // pthread condition variables
+  /////////////////////////////////////////////////////////////////////////////// Pthread Condition Variable
+
   int pthread_cond_init(pthread_cond_t * cond, const pthread_condattr_t * attr) {
     if (qthread_initialized) {
       return Qthread::GetInstance().CondInit(cond, attr);
@@ -227,10 +256,12 @@ extern "C" {
     return 0;
   }
 
+  // Broadcast has not been implemented
   int pthread_cond_broadcast(pthread_cond_t * cond) {
-    if (qthread_initialized) {
-      return Qthread::GetInstance().CondBroadcast(cond);
-    }
+    // if (qthread_initialized) {
+    //   return Qthread::GetInstance().CondBroadcast(cond);
+    // }
+    assert(0);
     return 0;
   }
 
@@ -249,10 +280,12 @@ extern "C" {
     return 0;
   }
 
+  // Barrier_wait has not been implemented
   int pthread_barrier_wait(pthread_barrier_t * barrier) {
-    if (qthread_initialized) {    
-      return Qthread::GetInstance().BarrierWait(barrier);
-    }
+    assert(0);
+    // if (qthread_initialized) {    
+    //   return Qthread::GetInstance().BarrierWait(barrier);
+    // }
     return 0;
   }
 

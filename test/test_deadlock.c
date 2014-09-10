@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#define Q
+
 pthread_mutex_t lockA;
 pthread_mutex_t lockB;
 
@@ -71,6 +73,9 @@ int main(int argc, char **argv) {
   pthread_create(&worker0, NULL, thread2, NULL);
   pthread_create(&worker1, NULL, thread1, NULL);
 
+#ifdef Q
+  qthread_hibernate_thread(0);
+#endif
 
   pthread_join(worker0, NULL);
   pthread_join(worker1, NULL);
