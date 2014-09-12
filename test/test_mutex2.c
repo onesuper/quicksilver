@@ -3,7 +3,6 @@
 #include <stdio.h>
 
 
-//#define Q 
 
 /* All threads use this lock to protect critical section */
 pthread_mutex_t g_lock;
@@ -42,16 +41,12 @@ int main(int argc, char **argv) {
 
   pthread_mutex_init(&g_lock, NULL);
 
-  const int nThreads = 6;
+  const int nThreads = 4;
   pthread_t workers[nThreads];
   int i;
 
   for (i = 0; i < nThreads; i++)
     pthread_create(&workers[i], NULL, worker, NULL);
-
-// #ifdef Q
-//   qthread_hibernate_thread(0);
-// #endif
 
 
   for (i = 0; i < nThreads; i++)

@@ -2,12 +2,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-pthread_mutex_t lockA;
-pthread_mutex_t lockB;
-pthread_mutex_t lockC;
-pthread_mutex_t lockD;
+pthread_spinlock_t lockA;
+pthread_spinlock_t lockB;
+pthread_spinlock_t lockC;
+pthread_spinlock_t lockD;
 
 #define N 6
+
+
 
 void do_something(void) {
   int i, a;
@@ -17,13 +19,12 @@ void do_something(void) {
 
 void *workerA(void *data) {
   int i;
-  for (i = 0; i < 12; i++) {
+  for (i = 0; i < 6; i++) {
     do_something();
-    pthread_mutex_lock(&lockA);
+    pthread_spin_lock(&lockA);
     do_something();
     printf("%lu is entering critial section %d\n", pthread_self(), i);
-    sleep(1);
-    pthread_mutex_unlock(&lockA);
+    pthread_spin_unlock(&lockA);
     do_something();
   }
   return NULL;
@@ -33,11 +34,10 @@ void *workerB(void *data) {
   int i;
   for (i = 0; i < N; i++) {
     do_something();
-    pthread_mutex_lock(&lockB);
+    pthread_spin_lock(&lockB);
     do_something();
     printf("%lu is entering critial section %d\n", pthread_self(), i);
-    sleep(1);
-    pthread_mutex_unlock(&lockB);
+    pthread_spin_unlock(&lockB);
     do_something();
   }
   return NULL;
@@ -47,11 +47,10 @@ void *workerC(void *data) {
   int i;
   for (i = 0; i < N; i++) {
     do_something();
-    pthread_mutex_lock(&lockB);
+    pthread_spin_lock(&lockB);
     do_something();
     printf("%lu is entering critial section %d\n", pthread_self(), i);
-    sleep(1);
-    pthread_mutex_unlock(&lockB);
+    pthread_spin_unlock(&lockB);
     do_something();
   }
   return NULL;
@@ -61,11 +60,10 @@ void *workerD(void *data) {
   int i;
   for (i = 0; i < N; i++) {
     do_something();
-    pthread_mutex_lock(&lockB);
+    pthread_spin_lock(&lockB);
     do_something();
     printf("%lu is entering critial section %d\n", pthread_self(), i);
-    sleep(1);
-    pthread_mutex_unlock(&lockB);
+    pthread_spin_unlock(&lockB);
     do_something();
   }
   return NULL;
@@ -74,10 +72,10 @@ void *workerD(void *data) {
 
 int main(int argc, char **argv) {
 
-  pthread_mutex_init(&lockA, NULL);
-  pthread_mutex_init(&lockB, NULL);
-  pthread_mutex_init(&lockC, NULL);
-  pthread_mutex_init(&lockD, NULL);
+  pthread_spin_init(&lockA, NULL);
+  pthread_spin_init(&lockB, NULL);
+  pthread_spin_init(&lockC, NULL);
+  pthread_spin_init(&lockD, NULL);
 
   pthread_t workers[4];
 
@@ -87,10 +85,14 @@ int main(int argc, char **argv) {
   pthread_create(&workers[2], NULL, workerC, NULL);
   pthread_create(&workers[3], NULL, workerD, NULL);
 
+
   pthread_join(workers[0], NULL);
   pthread_join(workers[1], NULL);
   pthread_join(workers[2], NULL);
   pthread_join(workers[3], NULL);
+
+
+
 
   return 0;
 }

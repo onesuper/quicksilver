@@ -63,8 +63,7 @@ int main(int argc, char **argv) {
     do_something();
   }
 
-  // this is for main's leave main
-  //qthread_leave_game();
+
 
   pthread_join(worker, NULL);
 

@@ -47,27 +47,19 @@ int main(int argc, char **argv) {
   for (i = 0; i < nThreads; i++)
     pthread_create(&workers[i], NULL, worker, NULL);
 
-  //qthread_hibernate_thread(0);
-
 
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);
 
-#if 0
-  qthread_wakeup_thread(0);
 
   for (i = 0; i < nThreads; i++)
     pthread_create(&workers[i], NULL, worker, NULL);
 
 
-  qthread_hibernate_thread(0);
-
   for (i = 0; i < nThreads; i++)
     pthread_join(workers[i], NULL);
 
-#endif
 
-  //qthread_wakeup_thread(0);
 
   return 0;
 }

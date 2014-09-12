@@ -17,12 +17,20 @@ extern "C" {
   // For example, if a thread doesn't acquire locks for a long time, it can call
 
 
-  void qthread_blah(void) {
+  void qthread_bla(void) {
     if (qthread_initialized) {
-      Qthread::GetInstance().Blah();
+      Qthread::GetInstance().Bla();
     }
     return;
   }
+
+  void qthread_blabla(void) {
+    if (qthread_initialized) {
+      Qthread::GetInstance().Blabla();
+    }
+    return;
+  }
+
 
   int qthread_hibernate_thread(size_t tid) {
     if (qthread_initialized) {

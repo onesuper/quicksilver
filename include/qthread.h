@@ -8,22 +8,26 @@
 #include "debug.h"
 #include "timer.h"
 #include "random.h"
-#include "entry.h"
 
 
-//#define FIRST_SLEEP_FIRST_WOKENUP
 
+///////////////////////////////////////////////////////////////////// Defines
+#define TOKEN_OWNERSHIP_ON 0
 
-// How soon can a lock be owned?
-#define LOCK_BUDGET 3
+// Each lock onwer has a budget when owning a certain lock. 
+#define LOCK_OWNER_BUDGET 3
 
-// The main program also has a thread tid and a pthread id
+// If defined, sleep entry works like a FIFO 
+#define FIRST_SLEEP_FIRST_WOKENUP 1
+
+// The main program also has a thread tid 
 #define MAIN_TID 0
+
+// And a pthread id
 #define MAIN_PID 65536
 
 
-
-// Pack all the parameters in a struct
+///////////////////////////////////////////////////////////////////// Fake thread entry/parameter
 class ThreadParam {
 public:
   volatile ThreadFunction func;  
@@ -33,6 +37,9 @@ public:
   ThreadParam(): func(NULL), tid(0), arg(NULL) {}
 };
 
+// Fake entry point of thread. We use it to unregister thread inside the thread body
+
+void * fake_thread_entry(void *);
 
 // The parameter we need the thread to have. All threads being spawned share one copy
 ThreadParam g_thread_param;
@@ -40,14 +47,22 @@ ThreadParam g_thread_param;
 // Used to keep the safety of parameters passed to each spawned thread 
 pthread_mutex_t g_spawn_lock;
 
+///////////////////////////////////////////////////////////////////// Lock Ownership  
 
-// Fake entry point of thread. We use it to unregister thread inside the thread body
-void * fake_thread_entry(void *);
+// Each thread can own one spin lock
+__thread void * owned_spinner;
+__thread unsigned int owned_spinner_budget;
 
-// Thread local storage: let each thread know who he is
+// And one mutex lock
+__thread void * owned_mutex;
+__thread unsigned int owned_mutex_budget;
+
+///////////////////////////////////////////////////////////////////// Others
+// let each thread know who he is
 __thread size_t my_tid;
 
-// This is to switch-off pthread API, before Qthread's ctor completes
+// This is to switch-off pthread API. 
+// We must garauntee that those APIs work after Qthread's ctor 
 static bool qthread_initialized = false;
 
 
@@ -55,12 +70,60 @@ static bool qthread_initialized = false;
 Timer g_total_timer;
   
 // Time consumed in waiting token
-Timer g_serial_timer;   
+Timer g_serial_timer;
+
 
 
 class Qthread {
 
 private:
+  // We use this to track thread's status. If a thread is waken up by 
+  // any sync operation (e.g. cond signal/mutex release), we move its entry from sleep list
+  // to active list, or vice versa.
+  enum ThreadStatus {
+    STATUS_READY = 0,         // Different reasons for sleeping
+    STATUS_LOCK_WAITING,      // The thread is waiting for a lock
+    STATUS_COND_WAITING,      // The thread is waiting for a condition to become true
+    STATUS_BARR_WAITING,      // The thread is waiting for other threads to pass the barrier
+    STATUS_JOINING_THREAD,    // The thread is joining other threads
+    STATUS_HIBERNATE,         // The thread will not enter critical section for a long time (for some reasons)
+  };
+
+
+  class ThreadEntry {
+  public:
+    volatile size_t tid;     // The thread we assigned
+    volatile pthread_t pid;  // Assigned by pthread_self
+    volatile int status;
+    volatile void * cond;    // each thread may wait for one cond each time   
+    volatile void * lock;
+    volatile size_t joinee_tid;  // I waiting for joining this thread
+
+    // volatile void * barrier;
+    // volatile bool broadcast; // If broadcast = true, the thread will be woken up by broadcast
+
+    inline ThreadEntry() {}
+
+    inline ThreadEntry(size_t tid, pthread_t pid) {
+      this->tid = tid;
+      this->pid = pid;
+      this->status = 0;  // 0 = ready
+      this->cond = NULL;
+      this->lock = NULL;
+      this->joinee_tid = 0;
+      // this->barrier = NULL;
+    }
+
+    inline ThreadEntry(const ThreadEntry & entry) {
+      this->tid = entry.tid;
+      this->pid = entry.pid;
+      this->status = entry.status;
+      this->cond = entry.cond;
+      this->lock = entry.lock;
+      this->joinee_tid = entry.joinee_tid;
+      // this->barrier = entry.barrier;
+    }
+  };
 
   // We will construct the instance in ctor
   static Qthread instance;
@@ -89,20 +152,22 @@ private:
   // Next random thread gets token 
   bool _random_next;
 
+
+
 public:
 
-  static inline Qthread& GetInstance(void) {
-    return instance;
-  }
 
-  ///////////////////////////////////////////////////////////////////// Constructor  
+  static inline Qthread& GetInstance(void) { return instance; }
+
+
+  //////////////////////////////////////////////////////////////////////////////////// Constructor  
   // Intially we register the main process (#0) in the activelist, and set up its tid
   // #0 is always registered the activelist for the whole lifetime of the program
   // #0 will get the token first, and the token will never be called back
   Qthread(bool random_next = false):
   _active_entries(),
   _sleep_entries(),
-  _thread_count(1), 
+  _thread_count(MAIN_TID), 
   _token_pos(0),   
   _token_tid(MAIN_TID),
   _random_next(random_next) // whether we use random_next strategy
@@ -117,8 +182,8 @@ public:
 
     // We register main thread manually (all the other threads are registerd when being spawned)
     my_tid = MAIN_TID;
+    _thread_count++;
     registerThread(MAIN_TID, MAIN_PID);  
-    DEBUG("RegMain: %d\n", MAIN_TID);
 
     // Set up the random number generator
     settable(12345,65435,34221,12345,9983651,95746118);
@@ -143,7 +208,6 @@ public:
     //ppthread_mutex_destroy(&_mutex);
     ppthread_mutex_destroy(&g_spawn_lock);
 
-
 #ifdef DEBUG
     g_total_timer.Pause();
     printf("Total Time: %ld\n", g_total_timer.Total());
@@ -156,7 +220,7 @@ public:
   //////////////////////////////////////////////////////////////////////////// Qthread Basics
   // Do nothing but make token can be passed through
   void DummySync(void) {
-    waitForToken();
+    waitToken();
     DEBUG("# DumSync: %lu\n", my_tid);
     passToken();
     return;
@@ -164,7 +228,7 @@ public:
 
   //The followin API is for activat/deactivate thread externally
   int HibernateThread(size_t tid) {
-    waitForToken();
+    waitToken();
     //DEBUG("# Hibernate(%lu): %lu\n", tid, my_tid);
     int retval = deactivateThread(tid, STATUS_HIBERNATE);
     passToken();
@@ -172,7 +236,7 @@ public:
   }
 
   int WakeUpThread(size_t tid) {
-    waitForToken();
+    waitToken();
     //("# WakeUp(%lu): %lu\n", tid, my_tid);
     int retval = activateThread(tid);
     passToken();
@@ -181,7 +245,7 @@ public:
 
   // A wrapper for calling through pthread id
   int HibernateThreadByPid(pthread_t pid) {
-    waitForToken();
+    waitToken();
     ThreadEntry * entry = getActiveEntryByPid(pid);
     if (entry == NULL) {
       DEBUG("# Hibernate404: %lu\n", my_tid);
@@ -195,7 +259,7 @@ public:
   }
  
   int WakeUpThreadByPid(pthread_t pid) {
-    waitForToken();
+    waitToken();
     ThreadEntry * entry = getActiveEntryByPid(pid);
     if (entry == NULL) { 
       DEBUG("# WakeUp404: %lu\n", my_tid);
@@ -213,7 +277,8 @@ public:
   // Spawing is treated as a sync point as well
   int Spawn(pthread_t * pid, const pthread_attr_t * attr, ThreadFunction func, void * arg) {
     
-    waitForToken();
+    waitToken();
+
     // This lock is just for the safety of 'thread_param' (global variable).
     // NOTE: this lock will make the initialization of threads be *serialized*. When we have a lot of 
     // threads to spawn, that may hurt performance. Try to replace it with a better mechanism later.
@@ -221,8 +286,7 @@ public:
 
     // Call gcc atomic operation to assign an increasing unique number
     size_t tid = __sync_fetch_and_add(&_thread_count, 1);
-
-    DEBUG("# Spawn(%lu): %lu\n", tid, my_tid);
+    //DEBUG("# Spawn(%lu): %lu\n", tid, my_tid);
 
     // Hook up the thread function and arguments
     g_thread_param.func = func;
@@ -231,13 +295,18 @@ public:
 
     // The unlock of spawn_lock is located in the ThreadFuncWrapper we passed to ppthread_create()
     int retval = ppthread_create(pid, attr, fake_thread_entry, &g_thread_param);
-    // ppthread_create may use lock internally and lose the token
-    waitForToken();
+    DEBUG("# Spawn(%lu+%lu): %lu\n", *pid, tid, my_tid);
+
+
+    waitToken();     // ppthread_create may use lock internally and lose the token
+
     passToken();
 
-    // IMPORTANT: We treat as another sync point 
-    // Register after we have created the thread. We also record the pthread_id
-    waitForToken();
+
+    // IMPORTANT: we treat as another sync point because...
+
+    waitToken();
+    // Register after we have created the thread. We also record the pthread_id    
     registerThread(tid, *pid);
     passToken();
 
@@ -246,20 +315,116 @@ public:
 
   // Call before a thread quit
   void Terminate(void) {
-    waitForToken();
+
+    waitToken();
+
+    // It is my duty to wake up my joiner
+    bool isFound = false;
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      ThreadEntry entry = _sleep_entries[i];
+      // My joiner record my pid joiner. Just scan the sleep entry and find who is joining me
+      if (entry.joinee_tid == my_tid) {
+        isFound = true;
+        DEBUG("# JoinActivate(%lu): %lu\n", entry.tid, my_tid);
+        entry.status = STATUS_READY;   // set ready
+        entry.joinee_tid = 0;
+        _active_entries.push_back(entry);  
+        _sleep_entries.erase(_sleep_entries.begin() + i);
+        break;   
+      }
+    }
+    //assert(isFound == true);
+
     deregisterThread(my_tid);
+
+    // // Pass token to the thread that should be woken up
+    // _token_pos = _active_entries.size() - 1;
+    // _token_tid = _active_entries[_token_pos].tid;
+    // DEBUG("# throwToken(%lu): %lu\n", _token_tid, my_tid);
+
     passToken();
     return;
   }
 
-  // pthread_join
-  int Join(pthread_t tid, void ** val) {
-    // The joiner hibernate itself and wake up after joining threads
-    // NOTE: It is dangerous!!!
-    //HibernateThread(my_tid);
-    int retval = ppthread_join(tid, val);
-    DEBUG("# Joined %lu\n", tid);
-    //WakeUpThread(my_tid);
+  // pthread_join will suspand until the joinee terminates, which will affect the token passing game
+  // So we must let him sleep and leave token passing game
+  int Join(pthread_t pid, void ** val) {
+
+    DEBUG("# Join(%lu): %lu\n", pid, my_tid);
+    
+    waitToken();
+
+    size_t joinee_tid;
+
+
+    bool isFound = false;
+
+    // FIXME: this conversion is time-comsuming because we need to scan both lists
+    // Conver joinee's pid to tid
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      ThreadEntry entry = _active_entries[i];
+      if (entry.pid == pid) {
+        isFound = true;
+        joinee_tid = entry.tid;
+        break;
+      }
+    }
+
+    // The thread I want to join may be found in the sleep list
+    if (!isFound) {
+      for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+        ThreadEntry entry = _sleep_entries[i];
+        if (entry.pid == pid) {
+          isFound = true;
+          joinee_tid = entry.tid;
+          break;
+        }
+      }
+    }
+
+
+    // It is possible that we can not find the entry in both lists
+    // This happens when the joinee executes faster than the joiner.
+    if (!isFound) {
+      passToken();
+      return ppthread_join(pid, val);
+    }
+
+
+    // If the joinee is still in the stage, I have to sleep
+    // Move my thread entry into sleep list
+    isFound = false;
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      ThreadEntry entry = _active_entries[i];  // Deep copy
+      // locate myself in the active entries
+      if (entry.tid == my_tid) {
+        isFound = true;
+        DEBUG("# JoinDeact(%lu): %lu\n", joinee_tid, my_tid);
+        entry.status = STATUS_JOINING_THREAD;     // Join thread
+        entry.joinee_tid = joinee_tid;            // I fall asleep because I want to join this thread
+
+        // Here we can change the order of being woken up
+#if FIRST_SLEEP_FIRST_WOKENUP
+        _sleep_entries.push_back(entry);
+#else
+        _sleep_entries.insert(_sleep_entries.begin(), entry); // append at head
+#endif
+        _active_entries.erase(_active_entries.begin() + i);
+
+        // NOTE: here we just adjust token pos back and do not change _token_tid
+        assert(!_active_entries.empty());
+        _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+        break;
+      }
+    }
+
+    assert(isFound == true);
+    passToken();
+
+
+    // Start to join that thread (suspand until the thread finishes)
+    int retval = ppthread_join(pid, val);
+
     return retval;
   }
 
@@ -280,8 +445,9 @@ public:
     return ppthread_mutex_destroy(mutex);
   }
 
+
   // In this version, if a thread want to acquire a lock, it will possibly leave the token passing game 
-  // The determinsim is ensured by enqueueing the thread into the sleeping list in a determinsitic order
+  // The determinsim is ensured by enqueueing the thread into the sleeping list in a deterministic order
   int LockAcquire(pthread_mutex_t * lock) {
 
     int retval = -1;
@@ -289,34 +455,16 @@ public:
     //DEBUG("# LockAcq...: %lu\n", my_tid);
 
     /////////////////////////////////////////////////////////////////////////////////////////
-    //               Phase I: Owned-Lock Accessing Phase
-    // In this phase, we acquire the lock as its owner. If I am its owner, then I don't need
-    // to wait token to progress. 
-    ThreadEntry * entry = getActiveEntry(my_tid);
-    assert(entry != NULL);
-    // If I own lock this lock?
-    if (entry->lock_ownership.lock == (void *) lock) {  
-      DEBUG("# LockAcqOwn(%p)[%u]: %lu\n", lock, entry->lock_ownership.budget, my_tid);
-      return ppthread_mutex_lock(lock);
-    }  
-
-    /////////////////////////////////////////////////////////////////////////////////////////
-    //               Phase II: Trylock & Sleep Phase 
+    //               Phase I: Trylock & Sleep Phase 
     // In this phase, we attempt to acquire that lock for the first time. If we fail to acquire
     // the lock, then we enter sleep state.
-    waitForToken();
+    waitToken();
 
     retval = ppthread_mutex_trylock(lock);
     // NOTE: Here we consider retval is either EBUSY or OK 
     if (retval != EBUSY) {
       // Acquired the lock
       DEBUG("# LockAcq0(%p): %lu\n", lock, my_tid);
-
-      // * Claim the ownership of the lock
-      // We only take the ownership of a certian lock in the serial phase to ensure determinism
-      entry->lock_ownership.lock = (void *) lock;
-      entry->lock_ownership.budget = LOCK_BUDGET;  // Recharge the budget
-      DEBUG("# OwnLock(%p): %lu\n", lock, my_tid);
 
       passToken();
       return retval;
@@ -331,15 +479,15 @@ public:
       // locate myself in the active entries
       if (entry.tid == my_tid) {
         isFound = true;
-        DEBUG("# LockDeactivate(%p): %lu\n", lock, my_tid);
+        DEBUG("# LockDeact(%p): %lu\n", lock, my_tid);
         entry.status = STATUS_LOCK_WAITING;     // mutex wait
         entry.lock = (void *) lock;
 
         // Here we can change the order of being woken up
-#ifdef FIRST_SLEEP_FIRST_WOKENUP
-        _sleep_entries.insert(_sleep_entries.begin(), entry); // append at head
-#else
+#if FIRST_SLEEP_FIRST_WOKENUP
         _sleep_entries.push_back(entry);
+#else
+        _sleep_entries.insert(_sleep_entries.begin(), entry); // append at head
 #endif
         _active_entries.erase(_active_entries.begin() + i);
 
@@ -355,7 +503,7 @@ public:
     passToken();
 
     /////////////////////////////////////////////////////////////////////////////////////////
-    //               Phase III: Wakeup & Acquire Phase
+    //               Phase II: Wakeup & Acquire Phase
     // I may be woken up at anytime when other thread call LockRelease(), since the OS can not
     // guarantee the FIFO order. So we hope the caller of LockRelease() can wake me up and pass
     // the token to me. Until he passes the token to me, I will continue to sleep on that lock. 
@@ -369,9 +517,11 @@ public:
       // IMPORTANT: Check whether I have token instead of scaning active entries
       // since LockRelease() will pass the token to me
       if (my_tid != _token_tid) {
-        __asm__ __volatile__ ("mfence");
         // DEBUG("# LockYield(%p): %lu\n", lock, my_tid);
-        ppthread_mutex_unlock(lock);  
+        ppthread_mutex_unlock(lock);
+
+        __asm__ __volatile__ ("mfence");
+
       } else { 
         // If we arrive here, this thread must have *really* acquired the lock
         DEBUG("# LockAcq(%p): %lu\n", lock, my_tid);  
@@ -388,28 +538,9 @@ public:
   // Wake up the first thread (who is wait the lock )in the sleep entries 
   int LockRelease(pthread_mutex_t * lock) {
     int retval = -1;
-
-
-    /////////////////////////////////////////////////////////////////////////////////////////
-    //               Phase I: Owned-Lock Accessing Phase
-    // In this phase, we release the lock as owner, no need to wait token to progress
-    // If thread is owning a lock, then he must be found in the active list.
-    ThreadEntry * entry = getActiveEntry(my_tid);
-    if (entry != NULL) {
-      if (entry->lock_ownership.lock == (void *) lock) {   // I have own this lock
-        --entry->lock_ownership.budget;  // spend budget
-        if (entry->lock_ownership.budget == 0) {
-          DEBUG("# YieldLock(%p): %lu\n", lock, my_tid);
-          entry->lock_ownership = NULL;
-        }
-        return ppthread_mutex_unlock(lock);
-      }
-    }
-
-
     //DEBUG("# ReleaseLock(%p): %lu\n", lock, my_tid);
 
-    waitForToken();
+    waitToken();
 
     DEBUG("# LockRel(%p): %lu\n", lock, my_tid);
 
@@ -438,10 +569,11 @@ public:
       _token_pos = _active_entries.size() - 1;
       _token_tid = _active_entries[_token_pos].tid;
       DEBUG("# throwToken(%lu): %lu\n", _token_tid, my_tid);
-      // Then wake him
+      // Then wake up him. This operation may wake up other thread than the target one
+      // but in our approach, they will sleep again
       retval = ppthread_mutex_unlock(lock); 
 
-    } else { // This path is followed when the lock is acquired by Acq0
+    } else { // This path is followed when there's no thread sleeping on that lock
       retval = ppthread_mutex_unlock(lock); 
       passToken();
     }
@@ -457,7 +589,7 @@ public:
     //DEBUG("# MutexLock: %lu\n", my_tid);
 
     while (true) { // As long as retval==EBUSY, the loop will go on
-      waitForToken();
+      waitToken();
       retval = ppthread_mutex_trylock(mutex);
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
@@ -466,19 +598,20 @@ public:
         DEBUG("# MutexLockBusy: %lu\n", my_tid);
         passToken();
       } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# MutexLockAcq(%p): %lu\n", mutex, my_tid); // acquire
-        passToken();
         break;
       }
     }
+
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# MutexLockAcq(%p): %lu\n", mutex, my_tid); // acquire
+    passToken();
     return retval;
   }
 
   int MutexUnlock(pthread_mutex_t * mutex) {
     int retval = -1;
     //DEBUG("# MutexUnlock: %lu\n", my_tid);
-    waitForToken();
+    waitToken();
     retval = ppthread_mutex_unlock(mutex);
     DEBUG("# MutexLockRel(%p): %lu\n", mutex, my_tid);
     passToken();
@@ -488,25 +621,21 @@ public:
   int MutexTrylock(pthread_mutex_t * mutex) {
     int retval = -1;
     //DEBUG("# MutexTryLock: %lu\n", my_tid);
-    while (true) {
-      waitForToken();          
-      // Acqurie the lock anyway, let other competitors sleep
-      retval = ppthread_mutex_trylock(mutex);
 
-      // This is a trylock, so we do not desire for locks
-      // If trylock failed, just return directly
-      if (retval == EBUSY) {
-        DEBUG("# MutexTryLockBusy: %lu\n", my_tid);
-        passToken();
-        return EBUSY;  
-      } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# MutexTryLockAcq: %lu\n", my_tid);
-        passToken();
-        break;
-      }
+    waitToken();          
+    retval = ppthread_mutex_trylock(mutex);
+
+    // This is a trylock, so we do not desire for locks
+    // If trylock failed, just return directly
+    if (retval == EBUSY) {
+      DEBUG("# MutexTryLockBusy: %lu\n", my_tid);
+      passToken();
+      return EBUSY;  
     }
 
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# MutexTryLockAcq: %lu\n", my_tid);
+    passToken();
     return retval;
   }
 
@@ -517,7 +646,6 @@ public:
     int retval = -1;
 
     //DEBUG("# MutexWaitLock: %lu\n", my_tid);
-  
     while (true) {
       retval = ppthread_mutex_lock(mutex);
       // Any thread may get the lock
@@ -525,8 +653,9 @@ public:
       // Check whether I have the token
       if (my_tid != _token_tid) {
         // if I have no token, yield the lock
-        DEBUG("# MutexLockYield: %lu\n", my_tid);
-        ppthread_mutex_unlock(mutex); 
+        // DEBUG("# MutexLockYield: %lu\n", my_tid);
+        ppthread_mutex_unlock(mutex);
+        __asm__ __volatile__ ("mfence");
       } else {
         break;
       }
@@ -542,11 +671,42 @@ public:
     return ppthread_spin_init(spinner, shared);
   }
 
+
+  int SpinDestroy(pthread_spinlock_t * spinner) {
+    return ppthread_spin_destroy(spinner);
+  }
+
+
   int SpinLock(pthread_spinlock_t * spinner) {
+    // pthread_mutex_lock/dummy_sync: if own lock, give up ownnership by unlocking it if needed
+ 
     int retval = -1;
-   // DEBUG("# SpinLock: %lu\n", my_tid);
+    // DEBUG("# SpinLock: %lu\n", my_tid);
+
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Owned-lock Acquisition
+    if (owned_spinner != NULL) {
+      // If I own this lock, then we don't need to wait token to acquire it. 
+      // Meanwhile the acquisition must succeed.
+      if (owned_spinner = (void *) spinner) {
+        DEBUG("# OwnSpinLockAcq(%p)[%u]: %lu\n", spinner, owned_spinner_budget, my_tid);
+        return ppthread_spin_lock(spinner);
+        // We don't really need to lock it since the ownership is exclusive
+        //return 0;
+      } else { // If I have already owned other lock,  I must yeild it
+        owned_spinner = NULL;
+        owned_spinner_budget = 0;
+        // if (owned_spinner.budget % 2) {
+        //   ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner.lock);
+        // }
+      }
+    }
+#endif
+
+    // Phase II: Ordinary Acquistion 
     while (true) {
-      waitForToken();
+      waitToken();
       retval = ppthread_spin_trylock(spinner);
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
@@ -554,49 +714,82 @@ public:
         DEBUG("# SpinLockBusy: %lu\n", my_tid);
         passToken();
       } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# SpinLockAcq: %lu\n", my_tid);
-        passToken();
         break;
       }
     }
-    return retval;
-  }
 
-  int SpinTrylock(pthread_spinlock_t * spinner) {
-    int retval = -1;
-    //DEBUG("# SpinTryLock: %lu\n", my_tid);
-    while (true) {
-      waitForToken();
-      retval = ppthread_spin_trylock(spinner);
-      // if trylock failed, we no longer check token, since we do not lock 
-      if (retval == EBUSY) {
-        DEBUG("# SpinTryLockBusy: %lu\n", my_tid);
-        passToken();
-        return EBUSY;
-      } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# SpinTryLockAcq: %lu\n", my_tid);
-        passToken();
-        break;
-      }      
-    }
+
+#if TOKEN_OWNERSHIP_ON
+    // Claim the ownership of the lock
+    // We take the ownership in the serial phase, so the determinism is guaranteed
+    // IMPORTANT: we always treat an encountered lock as a distinct lock, and take the
+    // ownership of it. 
+    owned_spinner = (void * ) spinner;
+    owned_spinner_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    DEBUG("# OwnSpinLock(%p): %lu\n", spinner, my_tid);
+#endif
+
+
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# SpinLockAcq: %lu\n", my_tid);
+    passToken();
     return retval;
   }
 
   int SpinUnlock(pthread_spinlock_t * spinner) {
+
     int retval = -1;
-    DEBUG("# SpinUnlock: %lu\n", my_tid);
-    waitForToken();
+    //DEBUG("# SpinUnlock: %lu\n", my_tid);
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Owned-lock release
+    if (owned_spinner != NULL) {
+
+      DEBUG("# OwnSpinLockRelease(%p)[%u]: %lu\n", spinner, owned_spinner_budget, my_tid);
+      retval = ppthread_spin_unlock(spinner);
+
+      // To avoid starvation, the lock owner has a pre-defined budget.
+      // If the budget has been used out, then thread has to yield the ownership. 
+
+      // Cost the budget when unlocking       
+      owned_spinner_budget--;
+
+      if (owned_spinner_budget == 0) {
+        DEBUG("# YieldSpinOwnership(%p): %lu\n", spinner, my_tid);
+        owned_spinner = NULL;
+      }
+      return retval;
+    }
+#endif
+
+    // Phase II: Ordinary Release 
+    waitToken();
     retval = ppthread_spin_unlock(spinner);
     DEBUG("# SpinLockRel: %lu\n", my_tid);
     passToken();
     return retval;
   }
 
-  int SpinDestroy(pthread_spinlock_t * spinner) {
-    return ppthread_spin_destroy(spinner);
+  int SpinTrylock(pthread_spinlock_t * spinner) {
+    int retval = -1;
+    //DEBUG("# SpinTryLock: %lu\n", my_tid);
+    
+    waitToken();
+    retval = ppthread_spin_trylock(spinner);
+      
+    // if trylock failed, we no longer check token, since we do not lock 
+    if (retval == EBUSY) {
+      DEBUG("# SpinTryLockBusy: %lu\n", my_tid);
+      passToken();
+      return EBUSY;
+    }   
+    
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# SpinTryLockAcq: %lu\n", my_tid);
+    passToken();
+    return retval;
   }
+
 
   //////////////////////////////////////////////////////////////////////////////// Read/Write lock
 
@@ -604,11 +797,15 @@ public:
     return ppthread_rwlock_init(rwlock, attr);
   }
 
+  int RwLockDestroy(pthread_rwlock_t * rwlock) {
+    return ppthread_rwlock_destroy(rwlock);
+  }  
+
   int RdLock(pthread_rwlock_t * rwlock) {
     int retval = -1;
     //DEBUG("# RdLock: %lu \n", my_tid);
     while (true) {
-      waitForToken();
+      waitToken();
       retval = ppthread_rwlock_tryrdlock(rwlock);
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
@@ -616,12 +813,12 @@ public:
         DEBUG("# RdLockBusy(%p): %lu\n", rwlock, my_tid);
         passToken();
       } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# RdLockAcq(%p): %lu\n", rwlock, my_tid);
-        passToken();
         break;
       }
     }
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# RdLockAcq(%p): %lu\n", rwlock, my_tid);
+    passToken();
     return retval;
   }
 
@@ -629,7 +826,7 @@ public:
     int retval = -1;
     //DEBUG("# WrLock: %lu\n", my_tid);
     while (true) {
-      waitForToken();
+      waitToken();
       retval = ppthread_rwlock_trywrlock(rwlock);
       // Any thread having token has the right to acquire the lock
       if (retval == EBUSY) {
@@ -637,70 +834,70 @@ public:
         DEBUG("# WrLockBusy(%p): %lu\n", rwlock, my_tid);
         passToken();
       } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# WrLockAcq(%p): %lu\n", rwlock, my_tid);
-        passToken();
         break;
       }
     }
+    
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# WrLockAcq(%p): %lu\n", rwlock, my_tid);
+    passToken();   
     return retval;
   }
 
-  int RdTryLock(pthread_rwlock_t * rwlock) {
-    int retval = -1;
-    //DEBUG("# TryRdLock: %lu\n", my_tid);
-    while (true) {
-      waitForToken();
-      retval = ppthread_rwlock_tryrdlock(rwlock);
-      // if trylock failed, we no longer check token, since we do not lock 
-      if (retval == EBUSY) {
-        DEBUG("# TryRdLockBusy(%p): %lu\n", rwlock, my_tid);
-        passToken();
-        return EBUSY;
-      } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# TryRdLockAcq(%p): %lu\n", rwlock, my_tid);
-        passToken();
-        break;
-      }      
-    }
-    return retval;
-  }
-
-  int WrTryLock(pthread_rwlock_t * rwlock) {
-    int retval = -1;
-    //DEBUG("# TryWrLock: %lu\n", my_tid);
-    while (true) {
-      waitForToken();
-      retval = ppthread_rwlock_trywrlock(rwlock);
-      // if trylock failed, we no longer check token, since we do not lock 
-      if (retval == EBUSY) {
-        DEBUG("# TryWrLockBusy(%p): %lu\n", rwlock ,my_tid);
-        passToken();
-        return EBUSY;
-      } else {
-        // If we arrive here, this thread must have acquired the lock
-        DEBUG("# TryWrLockAcq(%p): %lu\n", rwlock, my_tid);
-        passToken();
-        break;
-      }      
-    }
-    return retval;
-  }  
 
   int RwUnlock(pthread_rwlock_t * rwlock) {
     int retval = -1;
     //DEBUG("# RwUnlock: %lu\n", my_tid);
-    waitForToken();
+    waitToken();
     retval = ppthread_rwlock_unlock(rwlock);
     DEBUG("# RwLockRelease(%p): %lu\n", rwlock, my_tid);
     passToken();
     return retval;
   }
 
-  int RwLockDestroy(pthread_rwlock_t * rwlock) {
-    return ppthread_rwlock_destroy(rwlock);
+
+  int RdTryLock(pthread_rwlock_t * rwlock) {
+    int retval = -1;
+    //DEBUG("# TryRdLock: %lu\n", my_tid);
+    
+    waitToken();
+    retval = ppthread_rwlock_tryrdlock(rwlock);
+
+    // if trylock failed, we no longer check token, since we do not lock 
+    if (retval == EBUSY) {
+      DEBUG("# TryRdLockBusy(%p): %lu\n", rwlock, my_tid);
+      passToken();
+      return EBUSY;
+    } 
+      
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# TryRdLockAcq(%p): %lu\n", rwlock, my_tid);
+    passToken();
+    return retval;
   }
+
+  int WrTryLock(pthread_rwlock_t * rwlock) {
+    int retval = -1;
+    //DEBUG("# TryWrLock: %lu\n", my_tid);
+
+    waitToken();
+    retval = ppthread_rwlock_trywrlock(rwlock);
+    
+    // if trylock failed, we no longer check token, since we do not lock 
+    if (retval == EBUSY) {
+      DEBUG("# TryWrLockBusy(%p): %lu\n", rwlock ,my_tid);
+      passToken();
+      return EBUSY;
+    } 
+    
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# TryWrLockAcq(%p): %lu\n", rwlock, my_tid);
+    passToken();
+    return retval;
+  }  
+
+
+
 
   ///////////////////////////////////////////////////////////////////////////////// Condition Variables
 
@@ -718,17 +915,17 @@ public:
     /////////////////////////////////////////////////////////////////////////////////////////
     //               Phase I: Sleep 
     // Before we sleep, move the entry to sleep list, so that the token passing game can go on
-    waitForToken();
+    waitToken();
     bool isFound = false;
     // Deactive myself
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       if (_active_entries[i].tid == my_tid) {
         isFound = true;
-        DEBUG("# CondDeactivate(%p): %lu\n", cond, my_tid);
+        DEBUG("# CondDeact(%p): %lu\n", cond, my_tid);
         ThreadEntry entry = _active_entries[i]; // Deep copy
         entry.status = STATUS_COND_WAITING;     // Cond wait
         entry.cond = (void *) cond;
-#ifdef FIRST_SLEEP_FIRST_WOKENUP
+#if FIRST_SLEEP_FIRST_WOKENUP
         _sleep_entries.push_back(entry);
 #else
         _sleep_entries.insert(_sleep_entries.begin(), entry); // append at head
@@ -796,7 +993,7 @@ public:
   int CondSignal(pthread_cond_t * cond) {
     int retval = -1;
 
-    waitForToken();
+    waitToken();
 
     bool isFound = false;
 
@@ -841,7 +1038,7 @@ public:
   int CondBroadcast(pthread_cond_t * cond) {
     int retval = -1;
 
-    waitForToken();
+    waitToken();
 
     int first_token_pos = -1;
 
@@ -901,8 +1098,9 @@ public:
 
 
 #ifdef DEBUG
+
   // Print the active list and sleep list elegantly
-  void Blah(void) {
+  inline void Bla(void) {
 
 //    DEBUG("\n* Token * ");
 //    DEBUG("%lu [%d]", _token_tid, _token_pos);
@@ -921,9 +1119,36 @@ public:
       DEBUG("%lu   ", _sleep_entries[i].tid);
     }
 
+    DEBUG("\n\n");
     return;
-
   }
+
+
+  // Print the active list and sleep list in detail
+  inline void Blabla(void) {
+    DEBUG("\n* Token tid ");
+    DEBUG("%lu", _token_tid);
+
+    DEBUG("\n* Token pos ");
+    DEBUG("%d", _token_pos);
+
+
+    DEBUG("\n* Active *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    for (unsigned int i = 0; i < _active_entries.size(); i++) {
+      ThreadEntry e = _active_entries[i];
+      DEBUG("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+    }
+
+    DEBUG("\n* Sleep *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
+      ThreadEntry e = _sleep_entries[i];
+      DEBUG("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+    }
+
+    DEBUG("\n\n");
+    return;
+  }
+
 #endif
 
 
@@ -931,9 +1156,10 @@ public:
 
 private:
 
+
   ///////////////////////////////////////////////////////////////////// Token passing primitives
   // Busy waiting until the caller get the token
-  inline void waitForToken(void) const {
+  inline void waitToken(void) const {
 
     // NOTE: It is reasonable to call waitToken() when there is no active thread at all
     // Because we assume the next behavior is to register/activate that thread
@@ -947,6 +1173,7 @@ private:
     //DEBUG("# GetToken: %lu\n", my_tid);
     return;
   }
+
 
   // Force token holder yield the token to the next thread in the active list
   // The calling thread doesn't have to be the token holder
@@ -1053,7 +1280,7 @@ private:
     // Locate the target thread in the entires
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       if (_active_entries[i].tid == tid) {
-        DEBUG("# Deactivate(%lu): %lu\n", tid, my_tid);
+        DEBUG("# Deact(%lu): %lu\n", tid, my_tid);
         ThreadEntry entry = _active_entries[i]; // Deep copy
         entry.status = status;
         _sleep_entries.push_back(entry);
@@ -1069,7 +1296,7 @@ private:
       }
     }
     // if  no entry is found
-    DEBUG("# Deactivate404(%lu): %lu\n", tid, my_tid);
+    DEBUG("# Deact404(%lu): %lu\n", tid, my_tid);
     return 1;
   }
 
