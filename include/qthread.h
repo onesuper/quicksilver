@@ -12,18 +12,19 @@
 
 
 ///////////////////////////////////////////////////////////////////// Defines
-#define TOKEN_OWNERSHIP_ON 0
+#define TOKEN_OWNERSHIP_ON 1
 
 // Each lock onwer has a budget when owning a certain lock. 
-#define LOCK_OWNER_BUDGET 3
+#define LOCK_OWNER_BUDGET 10
 
 // If defined, sleep entry works like a FIFO 
-#define FIRST_SLEEP_FIRST_WOKENUP 0
+#define FIRST_SLEEP_FIRST_WOKENUP 1
 
 // The main program also has a thread tid 
 #define MAIN_TID 0
 
-
+// If my_tid = INVALID_TID, all the sync operation will disabled
+#define INVALID_TID 0x7fffffff
 
 
 ///////////////////////////////////////////////////////////////////// Fake thread entry/parameter
@@ -58,7 +59,7 @@ __thread unsigned int owned_mutex_budget;
 
 ///////////////////////////////////////////////////////////////////// Others
 // let each thread know who he is
-__thread size_t my_tid;
+__thread size_t my_tid = INVALID_TID;
 
 // This is to switch-off pthread API. 
 // We must garauntee that those APIs work after Qthread's ctor 
@@ -226,6 +227,27 @@ public:
   // Do nothing but make token can be passed through
   void DummySync(void) {
     waitToken();
+
+#if TOKEN_OWNERSHIP_ON 
+    // If a thread just does not terminate, and still holds the ownership of its lock
+    // actually the thread stops acquire/release its owned lock
+    // In this case we just, force it to give up the ownership   
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    }
+
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    }
+
+#endif    
+
     DEBUG("# DumSync: %lu\n", my_tid);
     passToken();
     return;
@@ -329,10 +351,30 @@ public:
   }
 
 
+
   // Call before a thread quit
   void Terminate(void) {
 
     waitToken();
+
+#if TOKEN_OWNERSHIP_ON
+    // If a thread is going to terminate, if he still owned locks, 
+    // we must force him to give up the ownership
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    }
+
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    }
+
+#endif
 
     // It is my duty to wake up my joiner .But it is possible that I can not find the one
     // who joins me. This happens when the joinee executes faster than the joiner.    
@@ -375,6 +417,8 @@ public:
     passToken();
     return;
   }
+
+
 
   // pthread_join will suspand until the joinee terminates, which will affect the token passing game
   // So we must let him sleep and leave token passing game
@@ -482,6 +526,9 @@ public:
   // The determinsim is ensured by enqueueing the thread into the sleeping list in a deterministic order
   int LockAcquire(pthread_mutex_t * lock) {
 
+    if (my_tid == INVALID_TID)
+      ppthread_mutex_lock(lock);
+
     int retval = -1;
 
     //DEBUG("# LockAcq...: %lu\n", my_tid);
@@ -568,8 +615,35 @@ public:
 
   // Wake up the first thread (who is wait the lock )in the sleep entries 
   int LockRelease(pthread_mutex_t * lock) {
+
+    if (my_tid == INVALID_TID) 
+      return ppthread_mutex_unlock(lock);
+
     int retval = -1;
     //DEBUG("# ReleaseLock(%p): %lu\n", lock, my_tid);
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Owned-lock release
+    if (owned_mutex == (void *) lock) {
+
+      // We don't really need to call unlock(), because we still owned that lock
+      DEBUG("# OwnMutexLockRel(%p)[%u]: %lu\n", lock, owned_mutex_budget, my_tid);
+
+      // To avoid starvation, the lock owner has a pre-defined budget. We cost the budget when unlocking       
+      // If the budget has been used out, then thread has to yield the ownership. 
+      owned_mutex_budget--;
+
+      // The only condition to yield a lock is because we have used out its budget
+      if (owned_mutex_budget == 0) {
+        DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+        ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+        owned_mutex = NULL;
+      } 
+      return 0;
+    }
+
+#endif
+
 
     waitToken();
 
@@ -615,6 +689,7 @@ public:
 
   // This is naive version of mutex_lock(). Thread busy-waits for its turn
   int MutexLock(pthread_mutex_t * mutex) {
+
     int retval = -1;
 
     //DEBUG("# MutexLock: %lu\n", my_tid);
@@ -639,8 +714,36 @@ public:
     return retval;
   }
 
+
+
+
   int MutexUnlock(pthread_mutex_t * mutex) {
+
     int retval = -1;
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Owned-lock release
+    if (owned_mutex == (void *) mutex) {
+
+      // We don't really need to call unlock(), because we still owned that lock
+      DEBUG("# OwnMutexLockRel(%p)[%u]: %lu\n", mutex, owned_mutex_budget, my_tid);
+
+      // To avoid starvation, the lock owner has a pre-defined budget. We cost the budget when unlocking       
+      // If the budget has been used out, then thread has to yield the ownership. 
+      owned_mutex_budget--;
+
+      // The only condition to yield a lock is because we have used out its budget
+      if (owned_mutex_budget == 0) {
+        DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+        ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+        owned_mutex = NULL;
+      } 
+      return 0;
+    }
+
+#endif
+
+
     //DEBUG("# MutexUnlock: %lu\n", my_tid);
     waitToken();
     retval = ppthread_mutex_unlock(mutex);
@@ -650,8 +753,26 @@ public:
   }
 
   int MutexTrylock(pthread_mutex_t * mutex) {
+
+
     int retval = -1;
     //DEBUG("# MutexTryLock: %lu\n", my_tid);
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Own lock Acquisition
+
+    // If I own this lock, then we don't need to wait token to acquire it. 
+    // Meanwhile the acquisition must succeed.
+    if (owned_mutex == (void *) mutex) {
+      DEBUG("# OwnMutexLockAcq(%p): %lu\n", mutex, my_tid);
+      // We don't really need to lock it since the ownership is exclusive
+      // The lock is owned by me, I haven't released the lock at all
+      // I can hold this lock until I release the ownership     
+      return 0;
+    } 
+
+#endif
+
 
     waitToken();          
     retval = ppthread_mutex_trylock(mutex);
@@ -666,6 +787,30 @@ public:
 
     // If we arrive here, this thread must have acquired the lock
     DEBUG("# MutexTryLockAcq: %lu\n", my_tid);
+
+
+
+#if TOKEN_OWNERSHIP_ON
+    // Phase III: Claim the ownership 
+    // When I encounter a new lock, but I have already owned other lock, I have to 
+    // yield the old lock, since each thread can only own one lock each time
+    // So that the old lock can be acquired by other threads
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    } 
+    
+    // We always treat an encountered lock as a distinct lock, and take the ownership of it.     
+    // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
+    owned_mutex = (void * ) mutex;
+    owned_mutex_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    DEBUG("# OwnMutexLock(%p): %lu\n", mutex, my_tid);
+    
+#endif
+
+
     passToken();
     return retval;
   }
@@ -674,6 +819,9 @@ public:
   // checking the token. If it doesn't own token just yield it 
   // and repeat to acuquire the lock and then check the token...
   int MutexWaitLock(pthread_mutex_t * mutex) {
+
+    if (my_tid == INVALID_TID) return 0;
+
     int retval = -1;
 
     //DEBUG("# MutexWaitLock: %lu\n", my_tid);
@@ -709,33 +857,31 @@ public:
 
 
   int SpinLock(pthread_spinlock_t * spinner) {
-    // pthread_mutex_lock/dummy_sync: if own lock, give up ownnership by unlocking it if needed
+
  
     int retval = -1;
     // DEBUG("# SpinLock: %lu\n", my_tid);
 
 
 #if TOKEN_OWNERSHIP_ON
-    // Phase I: Owned-lock Acquisition
-    if (owned_spinner != NULL) {
-      // If I own this lock, then we don't need to wait token to acquire it. 
-      // Meanwhile the acquisition must succeed.
-      if (owned_spinner = (void *) spinner) {
-        DEBUG("# OwnSpinLockAcq(%p)[%u]: %lu\n", spinner, owned_spinner_budget, my_tid);
-        return ppthread_spin_lock(spinner);
-        // We don't really need to lock it since the ownership is exclusive
-        //return 0;
-      } else { // If I have already owned other lock,  I must yeild it
-        owned_spinner = NULL;
-        owned_spinner_budget = 0;
-        // if (owned_spinner.budget % 2) {
-        //   ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner.lock);
-        // }
-      }
-    }
+    // Phase I: Own lock Acquisition
+
+    // If I own this lock, then we don't need to wait token to acquire it. 
+    // Meanwhile the acquisition must succeed.
+    if (owned_spinner == (void *) spinner) {
+      DEBUG("# OwnSpinLockAcq(%p): %lu\n", spinner, my_tid);
+      // We don't really need to lock it since the ownership is exclusive
+      // The lock is owned by me, I haven't released the lock at all
+      // I can hold this lock until I release the ownership     
+      return 0;
+    } 
+
+    
 #endif
 
-    // Phase II: Ordinary Acquistion 
+    // Phase II: Ordinary Acquistion.
+    //  If we enter this phase, we need token to progress
+    // Try until we get the lock
     while (true) {
       waitToken();
       retval = ppthread_spin_trylock(spinner);
@@ -749,23 +895,36 @@ public:
       }
     }
 
+    // If we arrive here, this thread must have acquired the lock
+    DEBUG("# SpinLockAcqOk: %lu\n", my_tid);
+
 
 #if TOKEN_OWNERSHIP_ON
-    // Claim the ownership of the lock
-    // We take the ownership in the serial phase, so the determinism is guaranteed
-    // IMPORTANT: we always treat an encountered lock as a distinct lock, and take the
-    // ownership of it. 
+
+    // Phase III: Claim the ownership 
+    // When I encounter a new lock, but I have already owned other lock, I have to 
+    // yield the old lock, since each thread can only own one lock each time
+    // So that the old lock can be acquired by other threads
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    } 
+    
+    // We always treat an encountered lock as a distinct lock, and take the ownership of it.     
+    // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
     owned_spinner = (void * ) spinner;
     owned_spinner_budget = LOCK_OWNER_BUDGET;  // recharge the budget
     DEBUG("# OwnSpinLock(%p): %lu\n", spinner, my_tid);
+    
 #endif
 
-
-    // If we arrive here, this thread must have acquired the lock
-    DEBUG("# SpinLockAcq: %lu\n", my_tid);
     passToken();
     return retval;
   }
+
+
 
   int SpinUnlock(pthread_spinlock_t * spinner) {
 
@@ -774,23 +933,24 @@ public:
 
 #if TOKEN_OWNERSHIP_ON
     // Phase I: Owned-lock release
-    if (owned_spinner != NULL) {
+    if (owned_spinner == (void *) spinner) {
 
-      DEBUG("# OwnSpinLockRelease(%p)[%u]: %lu\n", spinner, owned_spinner_budget, my_tid);
-      retval = ppthread_spin_unlock(spinner);
+      // We don't really need to call unlock(), because we still owned that lock
+      DEBUG("# OwnSpinLockRel(%p)[%u]: %lu\n", spinner, owned_spinner_budget, my_tid);
 
-      // To avoid starvation, the lock owner has a pre-defined budget.
+      // To avoid starvation, the lock owner has a pre-defined budget. We cost the budget when unlocking       
       // If the budget has been used out, then thread has to yield the ownership. 
-
-      // Cost the budget when unlocking       
       owned_spinner_budget--;
 
+      // The only condition to yield a lock is because we have used out its budget
       if (owned_spinner_budget == 0) {
-        DEBUG("# YieldSpinOwnership(%p): %lu\n", spinner, my_tid);
+        DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+        ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
         owned_spinner = NULL;
-      }
-      return retval;
+      } 
+      return 0;
     }
+
 #endif
 
     // Phase II: Ordinary Release 
@@ -801,10 +961,29 @@ public:
     return retval;
   }
 
+
+
   int SpinTrylock(pthread_spinlock_t * spinner) {
+
     int retval = -1;
     //DEBUG("# SpinTryLock: %lu\n", my_tid);
     
+#if TOKEN_OWNERSHIP_ON
+    // Phase I: Own lock Acquisition
+
+    // If I own this lock, then we don't need to wait token to acquire it. 
+    // Meanwhile the acquisition must succeed.
+    if (owned_spinner == (void *) spinner) {
+      DEBUG("# OwnSpinLockAcq(%p): %lu\n", spinner, my_tid);
+      // We don't really need to lock it since the ownership is exclusive
+      // The lock is owned by me, I haven't released the lock at all
+      // I can hold this lock until I release the ownership     
+      return 0;
+    } 
+
+    
+#endif
+
     waitToken();
     retval = ppthread_spin_trylock(spinner);
       
@@ -816,7 +995,30 @@ public:
     }   
     
     // If we arrive here, this thread must have acquired the lock
-    DEBUG("# SpinTryLockAcq: %lu\n", my_tid);
+    DEBUG("# SpinTryLockAcqOK: %lu\n", my_tid);
+
+#if TOKEN_OWNERSHIP_ON
+
+    // Phase III: Claim the ownership 
+    // When I encounter a new lock, but I have already owned other lock, I have to 
+    // yield the old lock, since each thread can only own one lock each time
+    // So that the old lock can be acquired by other threads
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    } 
+    
+    // We always treat an encountered lock as a distinct lock, and take the ownership of it.     
+    // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
+    owned_spinner = (void * ) spinner;
+    owned_spinner_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    DEBUG("# OwnSpinLock(%p): %lu\n", spinner, my_tid);
+    
+#endif
+
+
     passToken();
     return retval;
   }
@@ -833,6 +1035,8 @@ public:
   }  
 
   int RdLock(pthread_rwlock_t * rwlock) {
+
+
     int retval = -1;
     //DEBUG("# RdLock: %lu \n", my_tid);
     while (true) {
@@ -854,6 +1058,8 @@ public:
   }
 
   int WrLock(pthread_rwlock_t * rwlock) {
+
+
     int retval = -1;
     //DEBUG("# WrLock: %lu\n", my_tid);
     while (true) {
@@ -877,6 +1083,7 @@ public:
 
 
   int RwUnlock(pthread_rwlock_t * rwlock) {
+
     int retval = -1;
     //DEBUG("# RwUnlock: %lu\n", my_tid);
     waitToken();
@@ -888,6 +1095,8 @@ public:
 
 
   int RdTryLock(pthread_rwlock_t * rwlock) {
+
+
     int retval = -1;
     //DEBUG("# TryRdLock: %lu\n", my_tid);
     
@@ -908,6 +1117,8 @@ public:
   }
 
   int WrTryLock(pthread_rwlock_t * rwlock) {
+
+
     int retval = -1;
     //DEBUG("# TryWrLock: %lu\n", my_tid);
 
@@ -931,7 +1142,6 @@ public:
 
 
   ///////////////////////////////////////////////////////////////////////////////// Condition Variables
-
   int CondInit(pthread_cond_t * cond, const pthread_condattr_t * attr) {
     return ppthread_cond_init(cond, attr);
   }
@@ -942,6 +1152,8 @@ public:
 
   // The condwait ressembles the implementation of lock acquire very much
   int CondWait(pthread_cond_t * cond, pthread_mutex_t * cond_mutex) {
+
+
     int retval = -1;
 
     /////////////////////////////////////////////////////////////////////////////////////////
@@ -1025,6 +1237,7 @@ public:
 
   // Only one thread in the waiting list is woken up (if any threads are blocked on cond)
   int CondSignal(pthread_cond_t * cond) {
+
     int retval = -1;
 
     waitToken();
@@ -1086,6 +1299,7 @@ public:
 
 
   int CondBroadcast(pthread_cond_t * cond) {
+
     int retval = -1;
 
     waitToken();
@@ -1150,64 +1364,66 @@ public:
   }
 
 
-#ifdef DEBUG
 
   // Print the active list and sleep list elegantly
-  inline void Bla(void) {
+  void Bla(void) {
 
-//    DEBUG("\n* Token * ");
-//    DEBUG("%lu [%d]", _token_tid, _token_pos);
+    // printf("\n* Token * ");
+    // printf("%lu [%d]", _token_tid, _token_pos);
 
-    DEBUG("\n* Active * ");
+    printf("\n* Active * ");
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       if (_token_pos == (int) i) {
-        DEBUG("[%lu]   ", _active_entries[i].tid);  // having token
+        printf("[%lu]   ", _active_entries[i].tid);  // having token
       } else {
-        DEBUG("%lu   ", _active_entries[i].tid);
+        printf("%lu   ", _active_entries[i].tid);
       }
     }
 
-    DEBUG("\n* Sleep * ");
+    printf("\n* Sleep * ");
     for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
-      DEBUG("%lu   ", _sleep_entries[i].tid);
+      printf("%lu   ", _sleep_entries[i].tid);
     }
 
-    DEBUG("\n\n");
+    printf("\n\n");
     return;
   }
 
 
   // Print the active list and sleep list in detail
-  inline void Blabla(void) {
-    DEBUG("\n* Token tid ");
-    DEBUG("%lu", _token_tid);
+  void Blabla(void) {
+    printf("\n* Token tid ");
+    printf("%lu", _token_tid);
 
-    DEBUG("\n* Token pos ");
-    DEBUG("%d", _token_pos);
+    printf("\n* Token pos ");
+    printf("%d", _token_pos);
 
 
-    DEBUG("\n* Active *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    printf("\n* Active *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       ThreadEntry e = _active_entries[i];
-      DEBUG("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+      printf("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
     }
 
-    DEBUG("\n* Sleep *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    printf("\n* Sleep *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
     for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
       ThreadEntry e = _sleep_entries[i];
-      DEBUG("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+      printf("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
     }
 
-    DEBUG("\n\n");
+    printf("\n\n");
     return;
   }
 
-#endif
+
 
 
 
 
 private:
+
+
+
 
 
   ///////////////////////////////////////////////////////////////////// Token passing primitives
@@ -1248,9 +1464,6 @@ private:
     
     return;
   }
-
-
-
 
 
 
@@ -1391,7 +1604,7 @@ void * fake_thread_entry(void * param) {
   // Dump parameters
   ThreadFunction my_func = obj->func;
   void * my_arg = (void *) obj->arg;
-  my_tid = obj->tid;  
+  my_tid = obj->tid;  // We set my_tid before the thread body
 
   // Unlock after copying out paramemters
   ppthread_mutex_unlock(&g_spawn_lock);
@@ -1401,6 +1614,8 @@ void * fake_thread_entry(void * param) {
 
   // Let each thread deregister it self
   Qthread::GetInstance().Terminate();
+
+  my_tid = INVALID_TID;  // We clear my_tid after the thread body
 
   return retval;
 }
