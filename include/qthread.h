@@ -1,3 +1,9 @@
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// 
+//
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
 #ifndef _QTHREAD_H_
 #define _QTHREAD_H_
 
@@ -428,6 +434,29 @@ public:
     
     waitToken();
 
+
+#if TOKEN_OWNERSHIP_ON 
+    // If a thread just does not terminate, and still holds the ownership of its lock
+    // actually the thread stops acquire/release its owned lock
+    // In this case we just, force it to give up the ownership   
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    }
+
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    }
+
+#endif  
+
+
+
     size_t joinee_tid;
 
 
@@ -529,6 +558,27 @@ public:
     if (my_tid == INVALID_TID)
       ppthread_mutex_lock(lock);
 
+
+#if TOKEN_OWNERSHIP_ON 
+    // If a thread just does not terminate, and still holds the ownership of its lock
+    // actually the thread stops acquire/release its owned lock
+    // In this case we just, force it to give up the ownership   
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    }
+
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    }
+#endif  
+
+
     int retval = -1;
 
     //DEBUG("# LockAcq...: %lu\n", my_tid);
@@ -611,6 +661,9 @@ public:
 
     return retval;
   }
+
+
+
 
 
   // Wake up the first thread (who is wait the lock )in the sleep entries 
@@ -1155,6 +1208,28 @@ public:
   // The condwait ressembles the implementation of lock acquire very much
   int CondWait(pthread_cond_t * cond, pthread_mutex_t * cond_mutex) {
     int retval = -1;
+
+
+#if TOKEN_OWNERSHIP_ON 
+    // If a thread just does not terminate, and still holds the ownership of its lock
+    // actually the thread stops acquire/release its owned lock
+    // In this case we just, force it to give up the ownership   
+    if (owned_spinner != NULL) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+    }
+
+    if (owned_mutex != NULL) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+    }
+#endif  
+
+
 
     /////////////////////////////////////////////////////////////////////////////////////////
     //                Phase II: Sleep Phase
