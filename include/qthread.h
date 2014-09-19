@@ -18,7 +18,7 @@
 
 
 ///////////////////////////////////////////////////////////////////// Defines
-#define TOKEN_OWNERSHIP_ON 1
+#define TOKEN_OWNERSHIP_ON 0
 
 // Each lock onwer has a budget when owning a certain lock. 
 #define LOCK_OWNER_BUDGET 10
@@ -58,10 +58,13 @@ pthread_mutex_t g_spawn_lock;
 // Each thread can own one spin lock
 __thread void * owned_spinner;
 __thread unsigned int owned_spinner_budget;
+__thread bool *owned_spinner_is_locked;
+
 
 // And one mutex lock
 __thread void * owned_mutex;
 __thread unsigned int owned_mutex_budget;
+__thread bool *owned_mutex_is_locked;
 
 ///////////////////////////////////////////////////////////////////// Others
 // let each thread know who he is
@@ -183,7 +186,6 @@ public:
     _sleep_entries.reserve(1024);
 
     // We register main thread manually (all the other threads are registerd when being spawned)
-    my_tid = MAIN_TID;
     DEBUG("# Regsiter(%lu): %lu\n", my_tid, my_tid);
     DEBUG("# InitToken(%lu): %lu\n", my_tid, my_tid);    
     ThreadEntry entry(MAIN_TID, 65536);         // Note: we do not care its pthread_id 
@@ -192,7 +194,7 @@ public:
     _token_pos = 0;
     _token_tid = MAIN_TID;
     _thread_unique_id = MAIN_TID + 1;      // Unique Id is the next number after MAIN_TID
-    
+    my_tid = MAIN_TID;
   
     // whether we use random_next strategy
     _random_next = random_next; 
@@ -232,7 +234,7 @@ public:
   //////////////////////////////////////////////////////////////////////////// Qthread Basics
   // Do nothing but make token can be passed through
   void DummySync(void) {
-    waitToken();
+    
 
 #if TOKEN_OWNERSHIP_ON 
     // If a thread just does not terminate, and still holds the ownership of its lock
@@ -243,6 +245,8 @@ public:
       ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
       owned_spinner = NULL;
       owned_spinner_budget = 0;
+      __asm__ __volatile__("mfence");      
+
     }
 
     if (owned_mutex != NULL) {
@@ -250,10 +254,12 @@ public:
       ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
       owned_mutex = NULL;
       owned_mutex_budget = 0;
+      __asm__ __volatile__("mfence");      
     }
 
 #endif    
 
+    waitToken();
     DEBUG("# DumSync: %lu\n", my_tid);
     passToken();
     return;
@@ -319,7 +325,6 @@ public:
 
     // Call gcc atomic operation to assign an increasing unique number
     size_t tid = __sync_fetch_and_add(&_thread_unique_id, 1);
-    //DEBUG("# Spawn(%lu): %lu\n", tid, my_tid);
 
     // Hook up the thread function and arguments
     g_thread_param.func = func;
@@ -329,6 +334,13 @@ public:
     // The unlock of spawn_lock is located in the ThreadFuncWrapper we passed to ppthread_create()
     int retval = ppthread_create(pid, attr, fake_thread_entry, &g_thread_param);
     DEBUG("# Spawn(%lu+%lu): %lu\n", *pid, tid, my_tid);
+
+    
+#if 1
+    passToken();
+    waitToken();
+#endif
+
 
     // FIXME: remove it later
     // Check duplication in active_entries
@@ -345,12 +357,17 @@ public:
     entry.status = STATUS_READY;
     _active_entries.push_back(entry);
 
-    // Start from a empty list
-    if (_token_pos == -1) {
-      _token_pos = 0;
-      _token_tid = tid;
-      DEBUG("# InitToken(%lu): %lu\n", tid, my_tid);
-    }
+    // // Start from a empty list
+    // if (_token_pos == -1) {
+    //   _token_pos = 0;
+
+    //   // Make sure the next token holder has seen the modification to memory 
+    //   __asm__ __volatile__ ("mfence");
+
+    //   _token_tid = tid;
+    //   DEBUG("# InitToken(%lu): %lu\n", tid, my_tid);
+    //   return retval;
+    // }
 
     passToken();
     return retval;
@@ -361,7 +378,6 @@ public:
   // Call before a thread quit
   void Terminate(void) {
 
-    waitToken();
 
 #if TOKEN_OWNERSHIP_ON
     // If a thread is going to terminate, if he still owned locks, 
@@ -371,6 +387,8 @@ public:
       ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
       owned_spinner = NULL;
       owned_spinner_budget = 0;
+      __asm__ __volatile__("mfence");            
+
     }
 
     if (owned_mutex != NULL) {
@@ -378,9 +396,12 @@ public:
       ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
       owned_mutex = NULL;
       owned_mutex_budget = 0;
-    }
+      __asm__ __volatile__("mfence");      
 
+    }
 #endif
+
+    waitToken();
 
     // It is my duty to wake up my joiner .But it is possible that I can not find the one
     // who joins me. This happens when the joinee executes faster than the joiner.    
@@ -409,7 +430,7 @@ public:
           _token_pos = -1;
           DEBUG("# CallbackToken: %lu\n", my_tid);
         } else { 
-          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+          _token_pos = (_token_pos - 1 + _active_entries.size()) % _active_entries.size();  // Roll back the pos
         }
       }
     }
@@ -430,10 +451,6 @@ public:
   // So we must let him sleep and leave token passing game
   int Join(pthread_t pid, void ** val) {
 
-    DEBUG("# Join(%lu): %lu\n", pid, my_tid);
-    
-    waitToken();
-
 
 #if TOKEN_OWNERSHIP_ON 
     // If a thread just does not terminate, and still holds the ownership of its lock
@@ -444,6 +461,8 @@ public:
       ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
       owned_spinner = NULL;
       owned_spinner_budget = 0;
+      __asm__ __volatile__("mfence");      
+
     }
 
     if (owned_mutex != NULL) {
@@ -451,9 +470,14 @@ public:
       ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
       owned_mutex = NULL;
       owned_mutex_budget = 0;
+      __asm__ __volatile__("mfence");      
     }
+#endif
 
-#endif  
+
+    DEBUG("# Join(%lu): %lu\n", pid, my_tid);
+    
+    waitToken();
 
 
 
@@ -517,7 +541,7 @@ public:
           _token_pos = -1;
           DEBUG("# CallbackToken: %lu\n", my_tid);
         } else { 
-          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+          _token_pos = (_token_pos - 1 + _active_entries.size()) % _active_entries.size();  // Roll back the pos
         }        
         break;
       }
@@ -547,16 +571,32 @@ public:
   }
 
   int MutexDestroy(pthread_mutex_t * mutex) {
+
+
+#if TOKEN_OWNERSHIP_ON 
+    // If I am destroying my owned lock, I will give the ownership as well
+    // If we should not delay this behavior after we have freed this lock, 
+    // (e.g. in dummy_sync or before terminate). otherwise, the ppthread_mutex_unlock() might cause problem 
+    if (owned_mutex == (void *) mutex) {
+      DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
+      ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
+      owned_mutex = NULL;
+      owned_mutex_budget = 0;
+      __asm__ __volatile__("mfence");
+    }
+#endif  
+
     return ppthread_mutex_destroy(mutex);
   }
 
 
   // In this version, if a thread want to acquire a lock, it will possibly leave the token passing game 
   // The determinsim is ensured by enqueueing the thread into the sleeping list in a deterministic order
+  // No ownership !
   int LockAcquire(pthread_mutex_t * lock) {
 
     if (my_tid == INVALID_TID)
-      ppthread_mutex_lock(lock);
+      return ppthread_mutex_lock(lock);
 
 
 #if TOKEN_OWNERSHIP_ON 
@@ -616,18 +656,20 @@ public:
 #else
         _sleep_entries.insert(_sleep_entries.begin(), entry); // append at head
 #endif
+
         _active_entries.erase(_active_entries.begin() + i);
         // NOTE: here we just adjust token pos back and do not change _token_tid
         if (_active_entries.empty()) {
           _token_pos = -1;
           DEBUG("# CallbackToken: %lu\n", my_tid);
         } else { 
-          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+          _token_pos = (_token_pos - 1 + _active_entries.size()) % _active_entries.size();  // Roll back the pos
         }        
         break;
       }
     }
     assert(isFound == true);
+
     passToken();
 
     /////////////////////////////////////////////////////////////////////////////////////////
@@ -691,7 +733,12 @@ public:
         DEBUG("# LoseMutexLock(%p): %lu\n", owned_mutex, my_tid);
         ppthread_mutex_unlock((pthread_mutex_t *) owned_mutex);
         owned_mutex = NULL;
-      } 
+      }
+
+      // Pretend we unlock this mutex
+      owned_mutex_is_locked = false;
+      __asm__ __volatile__("mfence");      
+
       return 0;
     }
 
@@ -709,7 +756,7 @@ public:
       ThreadEntry entry = _sleep_entries[i];
       if (entry.lock == (void *) lock) {
         isFound = true;
-        DEBUG("# LockActivate(%lu): %lu\n", entry.tid, my_tid);
+        DEBUG("# LockAct(%lu): %lu\n", entry.tid, my_tid);
         entry.status = STATUS_READY;   // set ready
         entry.lock = NULL;
         _active_entries.push_back(entry);  
@@ -725,7 +772,15 @@ public:
     if (isFound) {
       // Pass token to the thread that should be woken up
       _token_pos = _active_entries.size() - 1;
+
+      // Make sure the next token holder has seen the memory modification
+      __asm__ __volatile__ ("mfence");
+
       _token_tid = _active_entries[_token_pos].tid;
+
+      __asm__ __volatile__ ("mfence");
+
+
       DEBUG("# throwToken(%lu): %lu\n", _token_tid, my_tid);
       // Then wake up him. This operation may wake up other thread than the target one
       // but in our approach, they will sleep again
@@ -740,6 +795,8 @@ public:
   }
 
 
+
+  // Abandoned API
   // This is naive version of mutex_lock(). Thread busy-waits for its turn
   int MutexLock(pthread_mutex_t * mutex) {
 
@@ -769,7 +826,7 @@ public:
 
 
 
-
+  // Abandoned API
   int MutexUnlock(pthread_mutex_t * mutex) {
 
     int retval = -1;
@@ -817,11 +874,20 @@ public:
     // If I own this lock, then we don't need to wait token to acquire it. 
     // Meanwhile the acquisition must succeed.
     if (owned_mutex == (void *) mutex) {
-      DEBUG("# OwnMutexLockAcq(%p): %lu\n", mutex, my_tid);
       // We don't really need to lock it since the ownership is exclusive
       // The lock is owned by me, I haven't released the lock at all
       // I can hold this lock until I release the ownership     
-      return 0;
+
+      if (owned_mutex_is_locked) {
+        DEBUG("# OwnMutexTryLockBusy(%p): %lu\n", mutex, my_tid);
+        return EBUSY;
+      } else {
+        DEBUG("# OwnMutexTryLockOK(%p): %lu\n", mutex, my_tid);
+        owned_mutex_is_locked = true;
+        __asm__ __volatile__("mfence");      
+        return 0;
+      }
+
     } 
 
 #endif
@@ -836,10 +902,11 @@ public:
       DEBUG("# MutexTryLockBusy: %lu\n", my_tid);
       passToken();
       return EBUSY;  
-    }
+    } 
+
 
     // If we arrive here, this thread must have acquired the lock
-    DEBUG("# MutexTryLockAcq: %lu\n", my_tid);
+    DEBUG("# MutexTryLockOK: %lu\n", my_tid);
 
 
 
@@ -859,8 +926,11 @@ public:
     // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
     owned_mutex = (void * ) mutex;
     owned_mutex_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    owned_mutex_is_locked = true;            // Intially, the owned lock is also locked
+    __asm__ __volatile__ ("mfence");
+
+
     DEBUG("# OwnMutexLock(%p): %lu\n", mutex, my_tid);
-    
 #endif
 
 
@@ -873,7 +943,6 @@ public:
   // and repeat to acuquire the lock and then check the token...
   int MutexWaitLock(pthread_mutex_t * mutex) {
 
-    if (my_tid == INVALID_TID) return 0;
 
     int retval = -1;
 
@@ -905,6 +974,20 @@ public:
 
 
   int SpinDestroy(pthread_spinlock_t * spinner) {
+
+#if TOKEN_OWNERSHIP_ON 
+    // If I am destroying my owned lock, I will give the ownership as well
+    // If we should not delay this behavior after we have freed this lock, 
+    // (e.g. in dummy_sync or before terminate). otherwise, the ppthread_mutex_unlock() might cause problem 
+    if (owned_spinner == (void *) spinner) {
+      DEBUG("# LoseSpinLock(%p): %lu\n", owned_spinner, my_tid);
+      ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
+      owned_spinner = NULL;
+      owned_spinner_budget = 0;
+      __asm__ __volatile__("mfence");
+    }
+#endif  
+
     return ppthread_spin_destroy(spinner);
   }
 
@@ -924,12 +1007,15 @@ public:
     if (owned_spinner == (void *) spinner) {
       DEBUG("# OwnSpinLockAcq(%p): %lu\n", spinner, my_tid);
       // We don't really need to lock it since the ownership is exclusive
-      // The lock is owned by me, I haven't released the lock at all
-      // I can hold this lock until I release the ownership     
+      // The lock is owned by me, I don't release the lock at all
+      // I can hold this lock until I release the ownership 
+
+      // But we still need to pretend to lock that spinner
+      owned_spinner_is_locked = true;
+      __asm__ __volatile__("mfence");
       return 0;
     } 
 
-    
 #endif
 
     // Phase II: Ordinary Acquistion.
@@ -969,6 +1055,9 @@ public:
     // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
     owned_spinner = (void * ) spinner;
     owned_spinner_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    owned_spinner_is_locked = true;            // Initally, the owned spinner is also locked
+    __asm__ __volatile__("mfence");      
+
     DEBUG("# OwnSpinLock(%p): %lu\n", spinner, my_tid);
     
 #endif
@@ -1001,6 +1090,11 @@ public:
         ppthread_spin_unlock((pthread_spinlock_t *) owned_spinner);
         owned_spinner = NULL;
       } 
+
+      // We pretend to lock that spinner, but behind the scene we don't 
+      // really need to call pthread_spin_unlock()
+      owned_spinner_is_locked = false;
+      __asm__ __volatile__("mfence");      
       return 0;
     }
 
@@ -1027,11 +1121,19 @@ public:
     // If I own this lock, then we don't need to wait token to acquire it. 
     // Meanwhile the acquisition must succeed.
     if (owned_spinner == (void *) spinner) {
-      DEBUG("# OwnSpinLockAcq(%p): %lu\n", spinner, my_tid);
       // We don't really need to lock it since the ownership is exclusive
       // The lock is owned by me, I haven't released the lock at all
-      // I can hold this lock until I release the ownership     
-      return 0;
+      // I can hold this lock until I release the ownership  
+
+      if (owned_spinner_is_locked) {
+        DEBUG("# OwnSpinLockBusy(%p): %lu\n", spinner, my_tid);        
+        return EBUSY;
+      } else {
+        DEBUG("# OwnSpinLockOK(%p): %lu\n", spinner, my_tid);
+        owned_spinner_is_locked = true;
+        __asm__ __volatile__("mfence");
+        return 0;
+      }
     } 
 
     
@@ -1048,7 +1150,7 @@ public:
     }   
     
     // If we arrive here, this thread must have acquired the lock
-    DEBUG("# SpinTryLockAcqOK: %lu\n", my_tid);
+    DEBUG("# SpinTryLockOK: %lu\n", my_tid);
 
 #if TOKEN_OWNERSHIP_ON
 
@@ -1067,6 +1169,7 @@ public:
     // NOTE: We take the ownership in the serial phase, so the determinism is guaranteed
     owned_spinner = (void * ) spinner;
     owned_spinner_budget = LOCK_OWNER_BUDGET;  // recharge the budget
+    owned_spinner_is_locked = true;            // Initally, the owned spinner is also locked
     DEBUG("# OwnSpinLock(%p): %lu\n", spinner, my_tid);
     
 #endif
@@ -1350,8 +1453,14 @@ public:
 
       // Pass token to the one that should be woken-up
       _token_pos = _active_entries.size() - 1;
+
+      __asm__ __volatile__("mfence");
+
       _token_tid = _active_entries.back().tid;
       DEBUG("# throwToken(%lu): %lu\n", _token_tid, my_tid);
+
+      __asm__ __volatile__("mfence");
+
 
       // Signal after throwing token
       DEBUG("# CondBSignal(%p): %lu\n", cond, my_tid);
@@ -1409,8 +1518,14 @@ public:
     if (first_token_pos != -1) {
 
       _token_pos = first_token_pos;
+
+      __asm__ __volatile__("mfence");
+
       _token_tid = _active_entries[_token_pos].tid;
       DEBUG("# throwToken(%lu): %lu\n", _token_tid, my_tid);
+
+      __asm__ __volatile__("mfence");
+
 
       DEBUG("# CondBroadcast(%p): %lu\n", cond, my_tid);
       retval = ppthread_cond_broadcast(cond);
@@ -1451,47 +1566,47 @@ public:
     // printf("\n* Token * ");
     // printf("%lu [%d]", _token_tid, _token_pos);
 
-    fprintf(stderr, "\n* Active * ");
+    printf("\n* Active * ");
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       if (_token_pos == (int) i) {
-        fprintf(stderr, "[%lu]   ", _active_entries[i].tid);  // having token
+        printf("[%lu]   ", _active_entries[i].tid);  // having token
       } else {
-        fprintf(stderr, "%lu   ", _active_entries[i].tid);
+        printf("%lu   ", _active_entries[i].tid);
       }
     }
 
-    fprintf(stderr, "\n* Sleep * ");
+    printf("\n* Sleep * ");
     for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
-      fprintf(stderr, "%lu   ", _sleep_entries[i].tid);
+      printf("%lu   ", _sleep_entries[i].tid);
     }
 
-    fprintf(stderr, "\n\n");
+    printf("\n\n");
     return;
   }
 
 
   // Print the active list and sleep list in detail
   void Blabla(void) {
-    fprintf(stderr, "\n* Token tid ");
-    fprintf(stderr, "%lu", _token_tid);
+    printf("\n* Token tid ");
+    printf("%lu", _token_tid);
 
-    fprintf(stderr, "\n* Token pos ");
-    fprintf(stderr, "%d", _token_pos);
+    printf("\n* Token pos ");
+    printf("%d", _token_pos);
 
 
-    fprintf(stderr, "\n* Active *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    printf("\n* Active *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
     for (unsigned int i = 0; i < _active_entries.size(); i++) {
       ThreadEntry e = _active_entries[i];
-      fprintf(stderr, "%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+      printf("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
     }
 
-    fprintf(stderr, "\n* Sleep *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
+    printf("\n* Sleep *\ntid\tstatus\tcond\tlock\tjoinee\tpid\n");
     for (unsigned int i = 0; i < _sleep_entries.size(); i++) {
       ThreadEntry e = _sleep_entries[i];
-      fprintf(stderr, "%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
+      printf("%lu\t%d\t%p\t%p\t%lu\t%lu\n", e.tid, e.status, e.cond, e.lock, e.joinee_tid, e.pid);
     }
 
-    fprintf(stderr, "\n\n");
+    printf( "\n\n");
     return;
   }
 
@@ -1537,11 +1652,13 @@ private:
       _token_pos = (_token_pos + 1) % _active_entries.size();
     }
 
+    __asm__ __volatile__ ("mfence");
+
+    _token_tid = _active_entries[_token_pos].tid;
 
     // Make sure the next token holder has seen the modification to memory 
     __asm__ __volatile__ ("mfence");
 
-    _token_tid = _active_entries[_token_pos].tid;
     DEBUG("# PassToken(->%lu): %lu\n", _token_tid, my_tid);
     
     return;
@@ -1593,7 +1710,7 @@ private:
           _token_pos = -1;
           DEBUG("# CallbackToken: %lu\n", my_tid);
         } else { 
-          _token_pos = (_token_pos - 1) % _active_entries.size();  // Roll back the pos
+          _token_pos = (_token_pos - 1 + _active_entries.size()) % _active_entries.size();  // Roll back the pos
         }        
         return 0;
       }
@@ -1686,11 +1803,13 @@ void * fake_thread_entry(void * param) {
   // Dump parameters
   ThreadFunction my_func = obj->func;
   void * my_arg = (void *) obj->arg;
-  my_tid = obj->tid;  // We set my_tid before the thread body
+  size_t tid = obj->tid;  // We set my_tid before the thread body
 
   // Unlock after copying out paramemters
   ppthread_mutex_unlock(&g_spawn_lock);
 
+
+  my_tid = tid;
   // Call the real thread function
   void * retval = my_func(my_arg);
 
